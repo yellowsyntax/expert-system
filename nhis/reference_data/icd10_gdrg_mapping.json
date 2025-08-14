@@ -1,0 +1,436 @@
+{
+  "I21_IPD": {
+    "icd10_code": "I21",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI07A",
+    "gdrg_description": "Cardiac emergencies",
+    "diagnosis_name": "Acute myocardial infarction",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "D50_OPD": {
+    "icd10_code": "D50",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Iron deficiency anaemia",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "I10_OPD": {
+    "icd10_code": "I10",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Essential (primary) hypertension",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": 2,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": []
+  },
+  "E11_OPD": {
+    "icd10_code": "E11",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Non-insulin-dependent diabetes mellitus",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": 2,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "K27_OPD": {
+    "icd10_code": "K27",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Peptic Ulcer",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "I50.9_IPD": {
+    "icd10_code": "I50.9",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI07A",
+    "gdrg_description": "Cardiac conditions",
+    "diagnosis_name": "Heart failure",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "E11_IPD": {
+    "icd10_code": "E11",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI02A",
+    "gdrg_description": "Diabetes with complications",
+    "diagnosis_name": "Non-insulin-dependent diabetes mellitus",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "I20_OPD": {
+    "icd10_code": "I20",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Angina pectoris",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": 2,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "I21_OPD": {
+    "icd10_code": "I21",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Acute myocardial infarction",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "I50.9_OPD": {
+    "icd10_code": "I50.9",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Heart failure",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": 2,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "I20_IPD": {
+    "icd10_code": "I20",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI07A",
+    "gdrg_description": "Cardiac conditions",
+    "diagnosis_name": "Angina pectoris",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "J18.9_OPD": {
+    "icd10_code": "J18.9",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Pneumonia",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "D50_IPD": {
+    "icd10_code": "D50",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI06A",
+    "gdrg_description": "Anaemia management",
+    "diagnosis_name": "Iron deficiency anaemia",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "I10_IPD": {
+    "icd10_code": "I10",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI32A",
+    "gdrg_description": "Hypertension management",
+    "diagnosis_name": "Essential (primary) hypertension",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": true,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "required_documents": []
+  },
+  "A09.0_IPD": {
+    "icd10_code": "A09.0",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI22A",
+    "gdrg_description": "Gastrointestinal infections",
+    "diagnosis_name": "Dysentery",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "B54_IPD": {
+    "icd10_code": "B54",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI28A",
+    "gdrg_description": "Malaria management",
+    "diagnosis_name": "Malaria",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "K27_IPD": {
+    "icd10_code": "K27",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI26A",
+    "gdrg_description": "Gastric conditions",
+    "diagnosis_name": "Peptic Ulcer",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "A09.0_OPD": {
+    "icd10_code": "A09.0",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Dysentery",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "B54_OPD": {
+    "icd10_code": "B54",
+    "encounter_type": "OPD",
+    "gdrg_code": "OPDC06A",
+    "gdrg_description": "General OPD Consultation",
+    "diagnosis_name": "Malaria",
+    "eligible_facilities": [
+      "A",
+      "B1",
+      "B2",
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  },
+  "J18.9_IPD": {
+    "icd10_code": "J18.9",
+    "encounter_type": "IPD",
+    "gdrg_code": "MEDI31A",
+    "gdrg_description": "Respiratory infections",
+    "diagnosis_name": "Pneumonia",
+    "eligible_facilities": [
+      "C",
+      "D1",
+      "D2",
+      "M",
+      "T"
+    ],
+    "is_chronic": false,
+    "max_visits_per_month": null,
+    "requires_specialist": false,
+    "age_restrictions": null,
+    "required_documents": []
+  }
+}

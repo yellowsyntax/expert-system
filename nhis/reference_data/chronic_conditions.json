@@ -1,0 +1,42 @@
+{
+  "I10": {
+    "icd10_code": "I10",
+    "diagnosis_name": "Essential (primary) hypertension",
+    "max_visits_per_month": 2,
+    "encounter_types": [
+      "OPD",
+      "IPD"
+    ],
+    "requires_specialist": false
+  },
+  "E11": {
+    "icd10_code": "E11",
+    "diagnosis_name": "Non-insulin-dependent diabetes mellitus",
+    "max_visits_per_month": 2,
+    "encounter_types": [
+      "OPD",
+      "IPD"
+    ],
+    "requires_specialist": false
+  },
+  "I50.9": {
+    "icd10_code": "I50.9",
+    "diagnosis_name": "Heart failure",
+    "max_visits_per_month": null,
+    "encounter_types": [
+      "IPD",
+      "OPD"
+    ],
+    "requires_specialist": false
+  },
+  "I20": {
+    "icd10_code": "I20",
+    "diagnosis_name": "Angina pectoris",
+    "max_visits_per_month": 2,
+    "encounter_types": [
+      "OPD",
+      "IPD"
+    ],
+    "requires_specialist": false
+  }
+}

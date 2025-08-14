@@ -1,0 +1,18 @@
+{
+  "ACUTE": {
+    "max_visits": 3,
+    "period_days": 14
+  },
+  "CHRONIC": {
+    "max_visits": 6,
+    "period_days": 365
+  },
+  "ANTENATAL": {
+    "max_visits": 6,
+    "period_days": 280
+  },
+  "POSTNATAL": {
+    "max_visits": 3,
+    "period_days": 42
+  }
+}

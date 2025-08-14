@@ -1,0 +1,8 @@
+{
+  "COSMETIC_SURGERY": {
+    "reason": "Cosmetic procedures not covered"
+  },
+  "EXPERIMENTAL_TREATMENTS": {
+    "reason": "Experimental treatments excluded"
+  }
+}

@@ -1,0 +1,210 @@
+{
+  "ACETYLTA1": {
+    "code": "ACETYLTA1",
+    "name": "Acetylsalicylic Acid Tablet, 300 mg",
+    "standard_dosage": "300mg",
+    "frequency": "OD",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "A",
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": true,
+    "separately_billable": false,
+    "indications": [
+      "I21"
+    ],
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "interaction_warnings": NaN
+  },
+  "FERSULTA1": {
+    "code": "FERSULTA1",
+    "name": "Ferrous Sulphate Tablet, 60 mg (Elemental Iron)",
+    "standard_dosage": "180mg",
+    "frequency": "TID",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "A",
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "D50"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "LISINOTA4": {
+    "code": "LISINOTA4",
+    "name": "Lisinopril Tablet, 20 mg",
+    "standard_dosage": "40mg",
+    "frequency": "OD",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "I10"
+    ],
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "interaction_warnings": NaN
+  },
+  "METFORTA1": {
+    "code": "METFORTA1",
+    "name": "Metformin Tablet, 500 mg",
+    "standard_dosage": "1000mg",
+    "frequency": "OD",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "E11"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "OMEPRATA1": {
+    "code": "OMEPRATA1",
+    "name": "Omeprazole Tablet, 20 mg",
+    "standard_dosage": "20mg",
+    "frequency": "OD",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "K27"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "FUROSEIN1": {
+    "code": "FUROSEIN1",
+    "name": "Furosemide Injection, 10 mg/mL in 2 mL",
+    "standard_dosage": "40mg",
+    "frequency": "BID",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": true,
+    "separately_billable": false,
+    "indications": [
+      "I50.9"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "GLTRSUTA1": {
+    "code": "GLTRSUTA1",
+    "name": "Glyceryl Trinitrate Sublingual Tablet, 500 microgram",
+    "standard_dosage": "500microgram",
+    "frequency": "stat",
+    "duration_days": 30,
+    "prescribing_levels": [
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "I20"
+    ],
+    "age_restrictions": {
+      "min_age": 18
+    },
+    "interaction_warnings": NaN
+  },
+  "COAMOXIN2": {
+    "code": "COAMOXIN2",
+    "name": "Amoxicillin + Clavulanic Acid Injection, 1.2g",
+    "standard_dosage": "1.2g",
+    "frequency": "TID",
+    "duration_days": 10,
+    "prescribing_levels": [
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": false,
+    "separately_billable": false,
+    "indications": [
+      "J18.9"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "METRONTA2": {
+    "code": "METRONTA2",
+    "name": "Metronidazole Tablet, 400 mg",
+    "standard_dosage": "800mg",
+    "frequency": "TID",
+    "duration_days": 5,
+    "prescribing_levels": [
+      "A",
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": true,
+    "separately_billable": false,
+    "indications": [
+      "A09.0"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  },
+  "AMOARTTA2": {
+    "code": "AMOARTTA2",
+    "name": "Amodiaquine + Artesunate Tablet, 135 mg + 50 mg (12tabs)",
+    "standard_dosage": "185mg",
+    "frequency": "BID",
+    "duration_days": 3,
+    "prescribing_levels": [
+      "A",
+      "B2",
+      "C",
+      "D1",
+      "D2"
+    ],
+    "is_bundled": true,
+    "separately_billable": false,
+    "indications": [
+      "B54"
+    ],
+    "age_restrictions": null,
+    "interaction_warnings": NaN
+  }
+}

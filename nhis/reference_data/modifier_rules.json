@@ -1,0 +1,24 @@
+{
+  "BILATERAL_SURGERY": {
+    "percentage": 120,
+    "description": "120% for bilateral procedures"
+  },
+  "DENTAL_MULTI_TOOTH": {
+    "base_percentage": 100,
+    "additional_percentage": 20
+  },
+  "MULTIPLE_PROCEDURES": {
+    "percentages": [
+      100,
+      20,
+      20,
+      0
+    ]
+  },
+  "EMERGENCY_MODIFIER": {
+    "percentage": 110,
+    "conditions": [
+      "A&E_AFTER_HOURS"
+    ]
+  }
+}

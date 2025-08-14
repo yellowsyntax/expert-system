@@ -1,0 +1,13 @@
+{
+  "ALL_INCLUSIVE": {
+    "description": "All investigations included in G-DRG",
+    "separately_billable_items": [
+      "CT_EMERGENCY",
+      "MRI_EMERGENCY"
+    ]
+  },
+  "UNBUNDLED": {
+    "description": "All investigations billable separately",
+    "separately_billable_items": []
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "total_records": 20,
+  "processed_records": 20,
+  "error_records": 0,
+  "unique_icd10_codes": 10,
+  "unique_gdrg_codes": 9,
+  "unique_medicines": 10
+}

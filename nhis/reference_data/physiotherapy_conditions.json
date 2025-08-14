@@ -1,0 +1,26 @@
+{
+  "I67.9": {
+    "condition": "CVA (Stroke)",
+    "max_sessions": 12
+  },
+  "S72": {
+    "condition": "Fractures",
+    "max_sessions": 6
+  },
+  "G80": {
+    "condition": "Cerebral palsy",
+    "max_sessions": 12
+  },
+  "Z89": {
+    "condition": "Amputation",
+    "max_sessions": 12
+  },
+  "T20": {
+    "condition": "Burns",
+    "max_sessions": 6
+  },
+  "S06": {
+    "condition": "Head & spinal cord injury",
+    "max_sessions": 12
+  }
+}

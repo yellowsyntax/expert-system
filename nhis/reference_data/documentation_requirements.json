@@ -1,0 +1,42 @@
+{
+  "I21_IPD": {
+    "icd10_code": "I21",
+    "encounter_type": "IPD",
+    "diagnosis_name": "Acute myocardial infarction",
+    "gdrg_code": "MEDI07A",
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "I20_OPD": {
+    "icd10_code": "I20",
+    "encounter_type": "OPD",
+    "diagnosis_name": "Angina pectoris",
+    "gdrg_code": "OPDC06A",
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "I21_OPD": {
+    "icd10_code": "I21",
+    "encounter_type": "OPD",
+    "diagnosis_name": "Acute myocardial infarction",
+    "gdrg_code": "OPDC06A",
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  },
+  "I20_IPD": {
+    "icd10_code": "I20",
+    "encounter_type": "IPD",
+    "diagnosis_name": "Angina pectoris",
+    "gdrg_code": "MEDI07A",
+    "required_documents": [
+      "ECG",
+      "cardiac_enzymes"
+    ]
+  }
+}
