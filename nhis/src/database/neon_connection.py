@@ -6,8 +6,11 @@ from contextlib import contextmanager
 from typing import Generator, Optional
 import logging
 from urllib.parse import quote_plus
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+load_dotenv()
 
 class NeonConnection:
     _instance = None
