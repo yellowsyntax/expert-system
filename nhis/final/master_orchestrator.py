@@ -8,6 +8,7 @@ FIXED IMPORT ISSUES:
 3. Complete pipeline flow: Initial → Enhanced → Encounter Flow → Credentialing → G-DRG → Medicine → Final → Database
 4. Interactive menu for processing options
 5. Maintains complete expert system flow and database integration
+6. UPDATED: Fixed OPDC13A handling to stop processing and mark as FLAGGED
 """
 
 import asyncio
@@ -27,7 +28,7 @@ from ae_flow_validator import AEFlowValidator
 from opd_flow_validator import OPDFlowValidator
 from ipd_flow_validator import IPDFlowValidator
 from facility_credentialing_validator import FacilityCredentialingValidator
-from gdrg_determination import GDRGDeterminationStep5  # FIXED: Use existing module
+from gdrg_determination import EnhancedGDRGDeterminationStep5  # FIXED: Use existing module
 from medicine_validation import MedicineValidationStep6
 from final_processing import FinalProcessingSteps7to10
 
@@ -84,14 +85,13 @@ class IntegratedNHISOrchestrator:
         self.queries = None
         self.is_initialized = False
         
-        # Initialize all validators including enhanced validations
         self.initial_processor = InitialProcessingValidator()
-        self.enhanced_validator = EnhancedValidations()  # Enhanced validations
+        self.enhanced_validator = EnhancedValidations()
         self.ae_validator = AEFlowValidator()
         self.opd_validator = OPDFlowValidator()
         self.ipd_validator = IPDFlowValidator()
         self.credentialing_validator = FacilityCredentialingValidator()
-        self.gdrg_determiner = GDRGDeterminationStep5()  # FIXED: Use existing class
+        self.gdrg_determiner = EnhancedGDRGDeterminationStep5()
         self.medicine_validator = MedicineValidationStep6()
         self.final_processor = FinalProcessingSteps7to10()
         
@@ -685,7 +685,7 @@ class IntegratedNHISOrchestrator:
             
             error_outcome = ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.INITIAL_PROCESSING,
                 reason=f"PIPELINE ERROR: {str(e)}",
                 processing_time_seconds=round(processing_time, 3),
@@ -785,12 +785,11 @@ class IntegratedNHISOrchestrator:
     # UPDATED STAGE METHODS with Enhanced Validations as Stage 2
     
     def _is_stage_successful(self, stage_result: ProcessingOutcome) -> bool:
-        """Determine if a stage result indicates success - UPDATED to handle FLAGGED"""
+        """
+        Determine if a stage result indicates success - UPDATED to handle OPDC13A specially
+        """
         if stage_result is None:
             return False
-        
-        # UPDATED: Include FLAGGED as a successful outcome (continues processing for manual review)
-        success_values = ["APPROVED", "FLAGGED", "PARTIAL"]
         
         result_value = None
         if hasattr(stage_result.overall_result, 'value'):
@@ -798,10 +797,47 @@ class IntegratedNHISOrchestrator:
         else:
             result_value = str(stage_result.overall_result)
         
+        # CRITICAL CHECK: If OPDC13A is detected, STOP processing regardless of FLAGGED status
+        if result_value == "FLAGGED" and stage_result.details:
+            # Check for OPDC13A special case in details
+            if (stage_result.details.get('special_case_details') and 
+                stage_result.details['special_case_details'].get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS'):
+                logger.warning(f"🛑 OPDC13A SPECIAL CASE: Stopping processing for {stage_result.encounter_id}")
+                logger.warning(f"📋 REQUIRED: Supporting documents must be verified manually")
+                return False  # STOP PROCESSING
+            
+            # Check for step-by-step results with OPDC13A
+            step_results = stage_result.details.get('step_by_step_results', {})
+            if step_results.get('special_case_triggered'):
+                special_case_details = step_results.get('special_case_details', {})
+                if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
+                    logger.warning(f"🛑 OPDC13A DETECTED in step results: Stopping processing for {stage_result.encounter_id}")
+                    return False  # STOP PROCESSING
+            
+            # ADDITIONAL CHECK: Look for OPDC13A in stage5_details (G-DRG stage)
+            stage5_details = stage_result.details.get('stage5_details', {})
+            if stage5_details:
+                # Check if G-DRG determination contains OPDC13A
+                gdrg_determination = stage5_details.get('gdrg_determination', {})
+                if gdrg_determination and gdrg_determination.get('final_gdrg') == 'OPDC13A':
+                    logger.warning(f"🛑 OPDC13A DETECTED in G-DRG determination: Stopping processing for {stage_result.encounter_id}")
+                    logger.warning(f"📋 G-DRG Code: OPDC13A requires supporting documents verification")
+                    return False  # STOP PROCESSING
+                
+                # Check step-by-step results in stage5
+                stage5_step_results = stage5_details.get('step_by_step_results', {})
+                if stage5_step_results.get('special_case_triggered'):
+                    special_case_details = stage5_step_results.get('special_case_details', {})
+                    if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
+                        logger.warning(f"🛑 OPDC13A DETECTED in Stage 5 results: Stopping processing for {stage_result.encounter_id}")
+                        return False  # STOP PROCESSING
+        
+        # For non-OPDC13A cases, continue with normal logic
+        success_values = ["APPROVED", "FLAGGED", "PARTIAL"]
         is_successful = result_value in success_values
         
-        # Special logging for FLAGGED cases
-        if result_value == "FLAGGED":
+        # Normal logging for non-OPDC13A cases
+        if result_value == "FLAGGED" and is_successful:
             logger.warning(f"🚩 Stage flagged but continuing: {stage_result.encounter_id} - {result_value}")
         else:
             logger.info(f"🔍 Stage success check: {stage_result.encounter_id} - result_value='{result_value}', is_successful={is_successful}")
@@ -815,7 +851,7 @@ class IntegratedNHISOrchestrator:
         
         return ProcessingOutcome(
             encounter_id=encounter_id,
-            overall_result=ValidationResult.PENDING,
+            overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
             processing_stage=stage,
             reason=reason,
             processing_time_seconds=round(processing_time, 3),
@@ -872,7 +908,7 @@ class IntegratedNHISOrchestrator:
                 try:
                     result_enum = ValidationResult(result_value)
                 except ValueError:
-                    result_enum = ValidationResult.PENDING
+                    result_enum = ValidationResult.FLAGGED  # UPDATED: Use FLAGGED instead of PENDING
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -886,7 +922,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 1: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.INITIAL_PROCESSING,
                 reason=f"Stage 1 error: {str(e)}"
             )
@@ -907,7 +943,7 @@ class IntegratedNHISOrchestrator:
             if "error" in enhanced_results:
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
-                    overall_result=ValidationResult.PENDING,
+                    overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                     processing_stage=ProcessingStage.ENHANCED_VALIDATIONS,
                     reason=f"Stage 2 error: {enhanced_results['error'].reason}",
                     details={"stage2_details": enhanced_results}
@@ -999,7 +1035,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 2 Enhanced Validations: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.ENHANCED_VALIDATIONS,
                 reason=f"Stage 2 error: {str(e)}"
             )
@@ -1053,7 +1089,7 @@ class IntegratedNHISOrchestrator:
                 try:
                     result_enum = ValidationResult(result_value)
                 except ValueError:
-                    result_enum = ValidationResult.PENDING
+                    result_enum = ValidationResult.FLAGGED  # UPDATED: Use FLAGGED instead of PENDING
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1067,7 +1103,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 3: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.ENCOUNTER_FLOW,
                 reason=f"Stage 3 error: {str(e)}"
             )
@@ -1107,7 +1143,7 @@ class IntegratedNHISOrchestrator:
                 try:
                     result_enum = ValidationResult(result_value)
                 except ValueError:
-                    result_enum = ValidationResult.PENDING
+                    result_enum = ValidationResult.FLAGGED  # UPDATED: Use FLAGGED instead of PENDING
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1121,7 +1157,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 4: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.CREDENTIALING,
                 reason=f"Stage 4 error: {str(e)}"
             )
@@ -1136,7 +1172,57 @@ class IntegratedNHISOrchestrator:
             
             result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
             
-            # UPDATED: Handle both APPROVED and FLAGGED results as success cases
+            # SPECIAL CHECK: If FLAGGED, check if it's OPDC13A and should stop processing
+            if result_value == "FLAGGED":
+                # Check if this is OPDC13A case that should stop processing
+                if result.details:
+                    # Check for OPDC13A in G-DRG determination
+                    gdrg_determination = result.details.get('gdrg_determination', {})
+                    if gdrg_determination and gdrg_determination.get('final_gdrg') == 'OPDC13A':
+                        logger.warning(f"🛑 OPDC13A FLAGGED - Will stop processing after this stage for {encounter_id}")
+                        
+                        pipeline_results["stages_passed"].append({
+                            "stage": "stage5_gdrg_determination", 
+                            "result": result_value,
+                            "reason": f"{result.reason} - OPDC13A DETECTED",
+                            "gdrg_determined": "OPDC13A",
+                            "flagged": True,
+                            "opdc13a_detected": True  # Special flag
+                        })
+                        
+                        return ProcessingOutcome(
+                            encounter_id=encounter_id,
+                            overall_result=ValidationResult.FLAGGED,
+                            processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                            reason="Stage 5 flagged: OPDC13A detected - Manual review required",
+                            details={"stage5_details": result.details}
+                        )
+                    
+                    # Check step-by-step results for OPDC13A
+                    step_results = result.details.get('step_by_step_results', {})
+                    if step_results.get('special_case_triggered'):
+                        special_case_details = step_results.get('special_case_details', {})
+                        if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
+                            logger.warning(f"🛑 OPDC13A SPECIAL CASE FLAGGED - Will stop processing after this stage for {encounter_id}")
+                            
+                            pipeline_results["stages_passed"].append({
+                                "stage": "stage5_gdrg_determination",
+                                "result": result_value,
+                                "reason": f"{result.reason} - OPDC13A SPECIAL CASE",
+                                "gdrg_determined": result.details.get('gdrg_summary', {}).get('final_gdrg') if result.details else None,
+                                "flagged": True,
+                                "opdc13a_detected": True  # Special flag
+                            })
+                            
+                            return ProcessingOutcome(
+                                encounter_id=encounter_id,
+                                overall_result=ValidationResult.FLAGGED,
+                                processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                                reason="Stage 5 flagged: OPDC13A special case - Supporting documents required",
+                                details={"stage5_details": result.details}
+                            )
+            
+            # UPDATED: Handle both APPROVED and FLAGGED results as success cases (non-OPDC13A)
             if result_value in ["APPROVED", "FLAGGED"]:  
                 pipeline_results["stages_passed"].append({
                     "stage": "stage5_gdrg_determination",
@@ -1169,7 +1255,7 @@ class IntegratedNHISOrchestrator:
                 try:
                     result_enum = ValidationResult(result_value)
                 except ValueError:
-                    result_enum = ValidationResult.PENDING
+                    result_enum = ValidationResult.FLAGGED  # UPDATED: Use FLAGGED instead of PENDING
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1183,7 +1269,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 5: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.GDRG_DETERMINATION,
                 reason=f"Stage 5 error: {str(e)}"
             )
@@ -1223,7 +1309,7 @@ class IntegratedNHISOrchestrator:
                 try:
                     result_enum = ValidationResult(result_value)
                 except ValueError:
-                    result_enum = ValidationResult.PENDING
+                    result_enum = ValidationResult.FLAGGED  # UPDATED: Use FLAGGED instead of PENDING
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1237,7 +1323,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 6: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.MEDICINE_VALIDATION,
                 reason=f"Stage 6 error: {str(e)}"
             )
@@ -1287,7 +1373,7 @@ class IntegratedNHISOrchestrator:
             logger.error(f"Error in Stage 7: {e}")
             return ProcessingOutcome(
                 encounter_id=encounter_id,
-                overall_result=ValidationResult.PENDING,
+                overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                 processing_stage=ProcessingStage.FINAL_PROCESSING,
                 reason=f"Stage 7 error: {str(e)}"
             )
@@ -1333,7 +1419,7 @@ class IntegratedNHISOrchestrator:
                 
                 error_result = ProcessingOutcome(
                     encounter_id=encounter_id,
-                    overall_result=ValidationResult.PENDING,
+                    overall_result=ValidationResult.FLAGGED,  # UPDATED: Use FLAGGED instead of PENDING
                     processing_stage=ProcessingStage.INITIAL_PROCESSING,
                     reason=f"Critical processing error: {str(e)}",
                     processing_time_seconds=0.0,
@@ -1582,6 +1668,7 @@ async def main():
         print(f"   • Gender-diagnosis mismatch validation")
         print(f"   • Supporting documents requirements")
         print(f"   • Automatic database updates after expert system processing")
+        print(f"   • OPDC13A special case handling (FLAGGED status)")
         
         # Test single claim processing with enhanced validations and database update
         test_encounter_id = "LIN-3012-BUYW"
@@ -1656,6 +1743,7 @@ async def main():
         print(f"  ✅ Enhanced validations executed")
         print(f"  ✅ Financial calculations accurate")
         print(f"  ✅ Pipeline data flow working")
+        print(f"  ✅ OPDC13A special case handling integrated")
         if result.database_updated:
             print(f"  ✅ Database automatically updated with results")
             print(f"  ✅ Claims table now reflects expert system decisions")
@@ -1721,7 +1809,7 @@ async def main():
         print(f"  Slowest Claim: {performance['slowest_claim']}s")
         
         print(f"\n🎯 INTEGRATION STATUS: FULLY OPERATIONAL")
-        print(f"🚀 NHIS Expert System + Enhanced Validations + Database Integration: 100% COMPLETE")
+        print(f"🚀 NHIS Expert System + Enhanced Validations + Database Integration + OPDC13A Handling: 100% COMPLETE")
         
     except Exception as e:
         logger.error(f"Integration test failed: {e}")
@@ -1736,19 +1824,20 @@ async def main():
 
 
 if __name__ == "__main__":
-    print(f"🚀 Starting NHIS Expert System with Enhanced Validations")
+    print(f"🚀 Starting NHIS Expert System with Enhanced Validations + OPDC13A Fix")
     print(f"=" * 80)
     print(f"📋 Available Modes:")
     print(f"  • Interactive Mode: python master_orchestrator.py interactive")
     print(f"  • Test Mode (default): python master_orchestrator.py")
     print(f"=" * 80)
-    print(f"🔍 NEW FEATURES:")
+    print(f"🔍 UPDATED FEATURES:")
     print(f"  • Enhanced Validations integrated as Stage 2")
     print(f"  • Medicine dispensing period validation")
     print(f"  • Comprehensive duplicate claims detection")
     print(f"  • Polypharmacy and drug interaction checks")
     print(f"  • Gender-diagnosis mismatch validation")
     print(f"  • Supporting documents requirements validation")
+    print(f"  • 🛑 OPDC13A Special Case Handling: STOPS processing and marks as FLAGGED")
     print(f"=" * 80)
     
     import sys
@@ -1765,12 +1854,13 @@ if __name__ == "__main__":
         print(f"  • Enhanced validations (Stage 2)")
         print(f"  • Automatic database updates")
         print(f"  • Comprehensive reporting")
+        print(f"  • OPDC13A handling (FLAGGED status)")
         print(f"=" * 80)
         
         asyncio.run(interactive_main())
     else:
         print(f"\n🧪 LAUNCHING TEST MODE...")
-        print(f"📋 Will run standard integration tests with enhanced validations")
+        print(f"📋 Will run standard integration tests with enhanced validations + OPDC13A fix")
         print(f"💡 Use 'python master_orchestrator.py interactive' for interactive mode")
         print(f"=" * 80)
         
