@@ -600,15 +600,50 @@ class IntegratedNHISOrchestrator:
             logger.info(f"✅ STAGE 5 PASSED for {encounter_id}: {stage_result.reason}")
             
             # Extract G-DRG tariff from Stage 5 results
-            if stage_result.details and stage_result.details.get('stage5_details'):
-                stage5_data = stage_result.details['stage5_details']
-                if stage5_data and stage5_data.get('gdrg_determination'):
-                    gdrg_determination = stage5_data['gdrg_determination']
-                    if gdrg_determination and gdrg_determination.get('tariff_info'):
-                        tariff_amount = gdrg_determination['tariff_info'].get('amount', 0.0)
-                        pipeline_results["financial_components"]["gdrg_tariff"] = float(tariff_amount)
-                        pipeline_results["stage_data"]["stage5_gdrg_determination"] = gdrg_determination
-                        logger.info(f"💰 Captured G-DRG tariff: {tariff_amount} GHS from Stage 5")
+            if stage_result.details:
+                if stage_result.details.get('stage5_details'):
+                    stage5_details = stage_result.details['stage5_details']
+                    logger.info(f"💰 NESTED STRUCTURE: Using stage5_details from nested structure")
+                else:
+                    stage5_details = stage_result.details
+                    logger.info(f"💰 FLAT STRUCTURE: Using details directly")
+
+                selected_tariff = 0.0
+                selected_gdrg = None
+
+                if stage5_details.get('selected_tariff'):
+                    selected_tariff = float(stage5_details['selected_tariff'])
+                    selected_gdrg = stage5_details.get('selected_gdrg')
+                    logger.info(f"💰 DIRECT ACCESS: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+
+                if selected_tariff == 0.0 and stage5_details.get('evaluation_summary'):
+                    eval_summary = stage5_details['evaluation_summary']
+                    selected_tariff = float(eval_summary.get('winning_tariff', 0.0))
+                    selected_gdrg = eval_summary.get('winner')
+                    logger.info(f"💰 EVAL SUMMARY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+
+                if selected_tariff == 0.0 and stage5_details.get('gdrg_summary'):
+                    gdrg_summary = stage5_details['gdrg_summary']
+                    selected_tariff = float(gdrg_summary.get('tariff_amount', 0.0))
+                    selected_gdrg = gdrg_summary.get('selected_gdrg')
+                    logger.info(f"💰 LEGACY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+
+                if selected_tariff > 0:
+                    pipeline_results["financial_components"]["gdrg_tariff"] = selected_tariff
+                    pipeline_results["stage_data"]["stage5_gdrg_determination"] = {
+                        'selected_gdrg': selected_gdrg,
+                        'selected_tariff': selected_tariff,
+                        'selected_tariff_info': {'amount': selected_tariff, 'currency': 'GHS'}
+                    }
+                    logger.info(f"💰 FIXED: Captured G-DRG {selected_gdrg} = {selected_tariff} GHS from Stage 5")
+                else:
+                    logger.error(f"💰 FAILED: Could not extract tariff from Stage 5")
+                    logger.error(f"Available keys: {list(stage5_details.keys()) if stage5_details else 'None'}")
+                    if stage5_details:
+                        logger.error(f"selected_tariff value: {stage5_details.get('selected_tariff')}")
+                        logger.error(f"evaluation_summary: {stage5_details.get('evaluation_summary')}")
+                            
+
             
             # STAGE 6: MEDICINE VALIDATION (formerly Stage 5)
             logger.info(f"💊 STAGE 6: Starting Medicine Validation for {encounter_id}")
