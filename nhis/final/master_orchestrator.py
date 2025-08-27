@@ -510,6 +510,8 @@ class IntegratedNHISOrchestrator:
             "stages_passed": [],
             "stages_failed": [],
             "overall_result": None,
+            "flagged_at_stage": None,
+            "flag_reason": None,
             "processing_path": [],
             "final_decision": None,
             "amounts": {
@@ -705,6 +707,23 @@ class IntegratedNHISOrchestrator:
         """Finalize processing with database update"""
         try:
             logger.info(f"💾 DATABASE UPDATE: Updating {encounter_id} with expert system results")
+
+            if pipeline_results.get("flagged_at_stage"):
+                processing_outcome.overall_result = ValidationResult.FLAGGED
+                flag_details = f"Medical coherence issues detected in {pipeline_results['flagged_at_stage']}"
+                processing_outcome.reason = f"FLAGGED: {flag_details} - Manual review required"
+
+            if processing_outcome.details is None:
+                processing_outcome.details = {}
+
+            processing_outcome.details.update({
+                "flagged_at_stage": pipeline_results['flagged_at_stage'],
+                "flag_reason": pipeline_results.get('flag_reason', 'Medical coherence issues detected'),
+                "medical_coherence_issues": pipeline_results.get('medical_coherence_issues', {}),
+                "requires_manual_review": True
+            })
+
+            logger.warning(f"🚩 PRESERVING FLAGGED STATUS for {encounter_id}: {flag_details}")
             
             # UPDATED: Handle FLAGGED claims in database update
             if processing_outcome.overall_result == ValidationResult.FLAGGED:
@@ -715,8 +734,8 @@ class IntegratedNHISOrchestrator:
                 flagged_db_outcome = ProcessingOutcome(
                     encounter_id=encounter_id,
                     overall_result=ValidationResult.FLAGGED,
-                    processing_stage=ProcessingStage.DATABASE_UPDATE,
-                    reason="FLAGGED: Manual review required - Supporting documents needed",
+                    processing_stage=processing_outcome.processing_stage,
+                    reason="FLAGGED: Manual review required",
                     details=processing_outcome.details
                 )
                 
@@ -735,7 +754,7 @@ class IntegratedNHISOrchestrator:
             
             if db_update_success:
                 pipeline_results["stages_passed"].append({
-                    "stage": "database_update",
+                    "stage": "GDRG_DETERMINATION",
                     "status": "PASSED",
                     "message": "Database successfully updated with expert system results"
                 })
@@ -806,6 +825,10 @@ class IntegratedNHISOrchestrator:
                 logger.warning(f"📋 REQUIRED: Supporting documents must be verified manually")
                 return False  # STOP PROCESSING
             
+
+        
+                
+            
             # Check for step-by-step results with OPDC13A
             step_results = stage_result.details.get('step_by_step_results', {})
             if step_results.get('special_case_triggered'):
@@ -866,7 +889,7 @@ class IntegratedNHISOrchestrator:
             }
         )
     
-    # Stage method implementations
+    
     
     async def _stage1_initial_processing(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
         """STAGE 1: Initial Processing (Input Validation + Steps 1-3)"""
@@ -877,6 +900,12 @@ class IntegratedNHISOrchestrator:
             result = await self.initial_processor.process_initial_validation(encounter_id)
             
             result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+
+            if result_value == "FLAGGED":
+                if not pipeline_results.get("flagged_at_stage"):
+                    pipeline_results["flagged_at_stage"] = "stage5_gdrg_determination"
+                    pipeline_results["flag_reason"] = result.reason
+                    logger.warning(f"CAPTURING FLAG: {encounter_id} flagged at Stage 5 - {result.reason}")
             
             if result_value == "APPROVED":
                 pipeline_results["stages_passed"].append({
@@ -1171,6 +1200,15 @@ class IntegratedNHISOrchestrator:
             result = await self.gdrg_determiner.process_step5_gdrg_determination(encounter_id)
             
             result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+
+            if result_value == "FLAGGED":
+                if not pipeline_results.get("flagged_at_stage"):
+                    pipeline_results["flagged_at_stage"] = "stage5_gdrg_determination"
+                    pipeline_results["flag_reason"] = result.reason
+
+                    if result.details and result.details.get('medical_coherence_checked'):
+                        pipeline_results["medical_coherence_issues"] = result.details.get('coherence_validation', {})
+
             
             # SPECIAL CHECK: If FLAGGED, check if it's OPDC13A and should stop processing
             if result_value == "FLAGGED":
