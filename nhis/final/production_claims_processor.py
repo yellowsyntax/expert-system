@@ -1,4 +1,503 @@
-import asyncio
+logger.error(f"Error in Stage 2 Enhanced Validations: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.ENHANCED_VALIDATIONS,
+                reason=f"Stage 2 error: {str(e)}"
+            )
+    
+    async def _stage3_encounter_flow(self, encounter_id: str, encounter_type: str, pipeline_results: Dict) -> ProcessingOutcome:
+        """Stage 3: Encounter-Specific Flow"""
+        try:
+            pipeline_results["stages_completed"].append("stage3_encounter_flow")
+            
+            if encounter_type == "A&E":
+                pipeline_results["processing_path"].append("A&E Flow")
+                result = await self.ae_validator.process_ae_flow_validation(encounter_id)
+            elif encounter_type == "OPD":
+                pipeline_results["processing_path"].append("OPD Flow")
+                result = await self.opd_validator.process_opd_flow_validation(encounter_id)
+            elif encounter_type == "IPD":
+                pipeline_results["processing_path"].append("IPD Flow")
+                result = await self.ipd_validator.process_ipd_flow_validation(encounter_id)
+            else:
+                raise ValueError(f"Unknown encounter type: {encounter_type}")
+            
+            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+            
+            if result_value in ["APPROVED", "FLAGGED"]:
+                pipeline_results["stages_passed"].append({
+                    "stage": "stage3_encounter_flow",
+                    "flow_type": encounter_type,
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                # Handle flagged results
+                if result_value == "FLAGGED":
+                    if not pipeline_results.get("flagged_at_stage"):
+                        pipeline_results["flagged_at_stage"] = "stage3_encounter_flow"
+                        pipeline_results["flag_reason"] = result.reason
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED,
+                    processing_stage=ProcessingStage.ENCOUNTER_FLOW,
+                    reason=f"Stage 3 passed: {encounter_type} flow completed",
+                    details={
+                        "encounter_type": encounter_type,
+                        "stage3_details": result.details
+                    }
+                )
+            else:
+                pipeline_results["stages_failed"].append({
+                    "stage": "stage3_encounter_flow",
+                    "flow_type": encounter_type,
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                try:
+                    result_enum = ValidationResult(result_value)
+                except ValueError:
+                    result_enum = ValidationResult.FLAGGED
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=result_enum,
+                    processing_stage=ProcessingStage.ENCOUNTER_FLOW,
+                    reason=f"Stage 3 failed: {result.reason}",
+                    details={"stage3_details": result.details}
+                )
+        
+        except Exception as e:
+            logger.error(f"Error in Stage 3: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.ENCOUNTER_FLOW,
+                reason=f"Stage 3 error: {str(e)}"
+            )
+    
+    async def _stage4_credentialing(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
+        """Stage 4: Credentialing Check"""
+        try:
+            pipeline_results["stages_completed"].append("stage4_credentialing")
+            pipeline_results["processing_path"].append("Credentialing")
+            
+            result = await self.credentialing_validator.process_step4_credentialing_check(encounter_id)
+            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+            
+            if result_value == "APPROVED":
+                pipeline_results["stages_passed"].append({
+                    "stage": "stage4_credentialing",
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=ValidationResult.APPROVED,
+                    processing_stage=ProcessingStage.CREDENTIALING,
+                    reason="Stage 4 passed: Credentialing validated",
+                    details={"stage4_details": result.details}
+                )
+            else:
+                pipeline_results["stages_failed"].append({
+                    "stage": "stage4_credentialing",
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                # Handle flagged results
+                if result_value == "FLAGGED":
+                    if not pipeline_results.get("flagged_at_stage"):
+                        pipeline_results["flagged_at_stage"] = "stage4_credentialing"
+                        pipeline_results["flag_reason"] = result.reason
+                
+                try:
+                    result_enum = ValidationResult(result_value)
+                except ValueError:
+                    result_enum = ValidationResult.FLAGGED
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=result_enum,
+                    processing_stage=ProcessingStage.CREDENTIALING,
+                    reason=f"Stage 4 failed: {result.reason}",
+                    details={"stage4_details": result.details}
+                )
+        
+        except Exception as e:
+            logger.error(f"Error in Stage 4: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.CREDENTIALING,
+                reason=f"Stage 4 error: {str(e)}"
+            )
+    
+    async def _stage5_gdrg_determination(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
+        """Stage 5: G-DRG Determination with OPDC13A handling"""
+        try:
+            pipeline_results["stages_completed"].append("stage5_gdrg_determination")
+            pipeline_results["processing_path"].append("G-DRG Determination")
+            
+            result = await self.gdrg_determiner.process_step5_gdrg_determination(encounter_id)
+            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+
+            if result_value == "FLAGGED":
+                if not pipeline_results.get("flagged_at_stage"):
+                    pipeline_results["flagged_at_stage"] = "stage5_gdrg_determination"
+                    pipeline_results["flag_reason"] = result.reason
+            
+            # Check for OPDC13A special case
+            if result_value == "FLAGGED" and result.details:
+                # Check for OPDC13A in G-DRG determination
+                gdrg_determination = result.details.get('gdrg_determination', {})
+                if gdrg_determination and gdrg_determination.get('final_gdrg') == 'OPDC13A':
+                    logger.warning(f"OPDC13A flagged - Will stop processing after this stage for {encounter_id}")
+                    
+                    pipeline_results["stages_passed"].append({
+                        "stage": "stage5_gdrg_determination", 
+                        "result": result_value,
+                        "reason": f"{result.reason} - OPDC13A DETECTED",
+                        "opdc13a_detected": True
+                    })
+                    
+                    return ProcessingOutcome(
+                        encounter_id=encounter_id,
+                        overall_result=ValidationResult.FLAGGED,
+                        processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                        reason="Stage 5 flagged: OPDC13A detected - Manual review required",
+                        details={"stage5_details": result.details}
+                    )
+                
+                # Check step-by-step results for OPDC13A
+                step_results = result.details.get('step_by_step_results', {})
+                if step_results.get('special_case_triggered'):
+                    special_case_details = step_results.get('special_case_details', {})
+                    if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
+                        logger.warning(f"OPDC13A special case flagged - Will stop processing after this stage for {encounter_id}")
+                        
+                        pipeline_results["stages_passed"].append({
+                            "stage": "stage5_gdrg_determination",
+                            "result": result_value,
+                            "reason": f"{result.reason} - OPDC13A SPECIAL CASE",
+                            "opdc13a_detected": True
+                        })
+                        
+                        return ProcessingOutcome(
+                            encounter_id=encounter_id,
+                            overall_result=ValidationResult.FLAGGED,
+                            processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                            reason="Stage 5 flagged: OPDC13A special case - Supporting documents required",
+                            details={"stage5_details": result.details}
+                        )
+            
+            # Handle successful results (APPROVED and non-OPDC13A FLAGGED)
+            if result_value in ["APPROVED", "FLAGGED"]:
+                pipeline_results["stages_passed"].append({
+                    "stage": "stage5_gdrg_determination",
+                    "result": result_value,
+                    "reason": result.reason,
+                    "flagged": result_value == "FLAGGED"
+                })
+                
+                outcome_result = ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED
+                stage_reason = "Stage 5 passed: G-DRG determined" if result_value == "APPROVED" else "Stage 5 flagged: G-DRG requires manual review"
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=outcome_result,
+                    processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                    reason=stage_reason,
+                    details={"stage5_details": result.details}
+                )
+            else:
+                pipeline_results["stages_failed"].append({
+                    "stage": "stage5_gdrg_determination",
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                try:
+                    result_enum = ValidationResult(result_value)
+                except ValueError:
+                    result_enum = ValidationResult.FLAGGED
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=result_enum,
+                    processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                    reason=f"Stage 5 failed: {result.reason}",
+                    details={"stage5_details": result.details}
+                )
+        
+        except Exception as e:
+            logger.error(f"Error in Stage 5: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.GDRG_DETERMINATION,
+                reason=f"Stage 5 error: {str(e)}"
+            )
+    
+    async def _stage6_medicine_validation(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
+        """Stage 6: Medicine Validation"""
+        try:
+            pipeline_results["stages_completed"].append("stage6_medicine_validation")
+            pipeline_results["processing_path"].append("Medicine Validation")
+            
+            result = await self.medicine_validator.process_step6_medicine_validation(encounter_id)
+            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+            
+            if result_value in ["APPROVED", "PARTIAL", "FLAGGED"]:
+                pipeline_results["stages_passed"].append({
+                    "stage": "stage6_medicine_validation",
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                # Handle flagged results
+                if result_value == "FLAGGED":
+                    if not pipeline_results.get("flagged_at_stage"):
+                        pipeline_results["flagged_at_stage"] = "stage6_medicine_validation"
+                        pipeline_results["flag_reason"] = result.reason
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED,
+                    processing_stage=ProcessingStage.MEDICINE_VALIDATION,
+                    reason="Stage 6 passed: Medicine validation completed",
+                    details={"stage6_details": result.details}
+                )
+            else:
+                pipeline_results["stages_failed"].append({
+                    "stage": "stage6_medicine_validation",
+                    "result": result_value,
+                    "reason": result.reason
+                })
+                
+                try:
+                    result_enum = ValidationResult(result_value)
+                except ValueError:
+                    result_enum = ValidationResult.FLAGGED
+                
+                return ProcessingOutcome(
+                    encounter_id=encounter_id,
+                    overall_result=result_enum,
+                    processing_stage=ProcessingStage.MEDICINE_VALIDATION,
+                    reason=f"Stage 6 failed: {result.reason}",
+                    details={"stage6_details": result.details}
+                )
+        
+        except Exception as e:
+            logger.error(f"Error in Stage 6: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.MEDICINE_VALIDATION,
+                reason=f"Stage 6 error: {str(e)}"
+            )
+    
+    async def _stage7_final_processing(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
+        """Stage 7: Final Processing"""
+        try:
+            pipeline_results["stages_completed"].append("stage7_final_processing")
+            pipeline_results["processing_path"].append("Final Processing")
+            
+            result = await self.final_processor.process_final_validation(encounter_id, pipeline_results["stage_data"])
+            
+            # Extract financial information
+            if result.details and result.details.get('amounts'):
+                pipeline_results["amounts"] = result.details['amounts']
+            
+            if result.details and result.details.get('final_decision'):
+                pipeline_results["final_decision"] = result.details['final_decision']
+            
+            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+            pipeline_results["overall_result"] = result_value
+            
+            # Handle flagged results
+            if result_value == "FLAGGED":
+                if not pipeline_results.get("flagged_at_stage"):
+                    pipeline_results["flagged_at_stage"] = "stage7_final_processing"
+                    pipeline_results["flag_reason"] = result.reason
+            
+            pipeline_results["stages_passed"].append({
+                "stage": "stage7_final_processing",
+                "result": result_value,
+                "reason": result.reason
+            })
+            
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=result.result,
+                processing_stage=ProcessingStage.FINAL_PROCESSING,
+                reason="Stage 7 completed: Final processing finished",
+                details={"stage7_details": result.details}
+            )
+        
+        except Exception as e:
+            logger.error(f"Error in Stage 7: {e}")
+            return ProcessingOutcome(
+                encounter_id=encounter_id,
+                overall_result=ValidationResult.FLAGGED,
+                processing_stage=ProcessingStage.FINAL_PROCESSING,
+                reason=f"Stage 7 error: {str(e)}"
+            )
+    
+    async def process_all_batches(self) -> List[BatchInfo]:
+        """Process all available batches automatically"""
+        try:
+            batch_ids = await self.get_batches_to_process()
+            
+            if not batch_ids:
+                logger.info("No batches with submitted claims found for processing")
+                return []
+            
+            logger.info(f"Starting automated processing of {len(batch_ids)} batches")
+            
+            processed_batches = []
+            
+            for i, batch_id in enumerate(batch_ids, 1):
+                try:
+                    logger.info(f"Processing batch {i}/{len(batch_ids)}: {batch_id}")
+                    
+                    batch_info = await self.process_batch(batch_id)
+                    processed_batches.append(batch_info)
+                    
+                    # Log batch completion
+                    logger.info(f"Batch {batch_id} completed: {batch_info.approved_claims} approved, "
+                              f"{batch_info.rejected_claims} rejected, {batch_info.flagged_claims} flagged, "
+                              f"{batch_info.partial_claims} partial, {batch_info.error_claims} errors")
+                
+                except Exception as e:
+                    logger.error(f"Error processing batch {batch_id}: {e}")
+                    
+                    # Create error batch info
+                    error_batch = BatchInfo(
+                        batch_id=batch_id,
+                        total_claims=0,
+                        error_claims=1,
+                        end_time=datetime.now()
+                    )
+                    processed_batches.append(error_batch)
+            
+            # Summary statistics
+            total_claims = sum(batch.total_claims for batch in processed_batches)
+            total_approved = sum(batch.approved_claims for batch in processed_batches)
+            total_rejected = sum(batch.rejected_claims for batch in processed_batches)
+            total_flagged = sum(batch.flagged_claims for batch in processed_batches)
+            total_partial = sum(batch.partial_claims for batch in processed_batches)
+            total_errors = sum(batch.error_claims for batch in processed_batches)
+            
+            logger.info(f"All batches processing completed:")
+            logger.info(f"  Total Batches: {len(processed_batches)}")
+            logger.info(f"  Total Claims: {total_claims}")
+            logger.info(f"  Approved: {total_approved}")
+            logger.info(f"  Rejected: {total_rejected}")
+            logger.info(f"  Flagged: {total_flagged}")
+            logger.info(f"  Partial: {total_partial}")
+            logger.info(f"  Errors: {total_errors}")
+            
+            approval_rate = (total_approved / total_claims * 100) if total_claims > 0 else 0
+            logger.info(f"  Overall Approval Rate: {approval_rate:.1f}%")
+            
+            return processed_batches
+            
+        except Exception as e:
+            logger.error(f"Error in automated batch processing: {e}")
+            return []
+
+    async def process_specific_batch(self, batch_id: str) -> BatchInfo:
+        """Process a specific batch by batch_id"""
+        try:
+            logger.info(f"Starting processing of specific batch: {batch_id}")
+            
+            batch_info = await self.process_batch(batch_id)
+            
+            logger.info(f"Batch {batch_id} processing completed:")
+            logger.info(f"  Total Claims: {batch_info.total_claims}")
+            logger.info(f"  Approved: {batch_info.approved_claims}")
+            logger.info(f"  Rejected: {batch_info.rejected_claims}")
+            logger.info(f"  Flagged: {batch_info.flagged_claims}")
+            logger.info(f"  Partial: {batch_info.partial_claims}")
+            logger.info(f"  Errors: {batch_info.error_claims}")
+            
+            return batch_info
+            
+        except Exception as e:
+            logger.error(f"Error processing specific batch {batch_id}: {e}")
+            return BatchInfo(
+                batch_id=batch_id,
+                total_claims=0,
+                error_claims=1,
+                end_time=datetime.now()
+            )
+
+
+async def main():
+    """Main entry point for automated batch processing"""
+    processor = AutomatedBatchProcessor()
+    
+    try:
+        await processor.initialize()
+        
+        logger.info("NHIS Automated Batch Claims Processor Started")
+        logger.info("Processing all batches with submitted claims...")
+        
+        # Process all available batches
+        processed_batches = await processor.process_all_batches()
+        
+        if processed_batches:
+            logger.info(f"Processing completed for {len(processed_batches)} batches")
+        else:
+            logger.info("No batches were processed")
+        
+    except Exception as e:
+        logger.error(f"Critical error in automated processing: {e}")
+        raise
+    
+    finally:
+        await processor.close()
+
+
+async def process_specific_batch_main(batch_id: str):
+    """Process a specific batch by batch_id"""
+    processor = AutomatedBatchProcessor()
+    
+    try:
+        await processor.initialize()
+        
+        logger.info(f"NHIS Automated Batch Claims Processor Started for batch: {batch_id}")
+        
+        # Process specific batch
+        batch_info = await processor.process_specific_batch(batch_id)
+        
+        return batch_info
+        
+    except Exception as e:
+        logger.error(f"Critical error processing batch {batch_id}: {e}")
+        raise
+    
+    finally:
+        await processor.close()
+
+
+if __name__ == "__main__":
+    import sys
+    
+    if len(sys.argv) > 1:
+        # Process specific batch if batch_id provided as argument
+        batch_id = sys.argv[1]
+        logger.info(f"Processing specific batch: {batch_id}")
+        asyncio.run(process_specific_batch_main(batch_id))
+    else:
+        # Process all available batches
+        logger.info("Processing all available batches")
+        asyncio.run(main())import asyncio
 import json
 import logging
 from typing import Dict, List, Optional, Any, Tuple
@@ -19,6 +518,7 @@ from gdrg_determination import EnhancedGDRGDeterminationStep5
 from medicine_validation import MedicineValidationStep6
 from final_processing import FinalProcessingSteps7to10
 from updatedb import DatabaseResultsUpdater
+from duplicate_claims_detector import DuplicateClaimsDetector, run_duplicate_detection_stage, DuplicateFlag
 
 from duplicate_claims_detector import DuplicateClaimsDetector, run_duplicate_detection_stage, DuplicateFlag
 
@@ -28,6 +528,7 @@ logger = logging.getLogger(__name__)
 
 class ProcessingStage(Enum):
     """Processing stages in the pipeline"""
+    DUPLICATE_DETECTION = "DUPLICATE_DETECTION"
     INITIAL_PROCESSING = "INITIAL_PROCESSING"
     ENHANCED_VALIDATIONS = "ENHANCED_VALIDATIONS"
     ENCOUNTER_FLOW = "ENCOUNTER_FLOW"
@@ -225,6 +726,28 @@ class AutomatedBatchProcessor:
             logger.error(f"Error getting clean claims for {batch_id}: {e}")
             return []
 
+    async def get_claim_existing_flag_reason(self, encounter_id: str) -> Optional[Dict[str, Any]]:
+        """Get existing flag_reason from database if claim was flagged during duplicate detection"""
+        try:
+            query = """
+            SELECT flag_reason, processed_status 
+            FROM claims_v3 
+            WHERE encounter_id = $1
+            """
+            
+            result = await self.queries.db.fetch_one(query, encounter_id)
+            
+            if result and result['flag_reason']:
+                if isinstance(result['flag_reason'], str):
+                    return json.loads(result['flag_reason'])
+                else:
+                    return result['flag_reason']
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error getting existing flag reason for {encounter_id}: {e}")
+            return None
 
     async def process_batch(self, batch_id: str) -> BatchInfo:
         """Process all claims in a specific batch"""
@@ -257,13 +780,12 @@ class AutomatedBatchProcessor:
 
             logger.info(f"VALIDATION PROCESSING: Starting for {len(clean_encounter_ids)} clean claims")
             
-            
             await self._update_batch_processing_status(batch_id, "processing")
             
-            # Process each claim
-            for i, encounter_id in enumerate(encounter_ids, 1):
+            # Process each clean claim (ones that passed duplicate detection)
+            for i, encounter_id in enumerate(clean_encounter_ids, 1):
                 try:
-                    logger.info(f"Processing claim {i}/{len(encounter_ids)}: {encounter_id}")
+                    logger.info(f"Processing claim {i}/{len(clean_encounter_ids)}: {encounter_id}")
                     
                     result = await self.process_complete_claim(encounter_id)
                     
@@ -282,9 +804,9 @@ class AutomatedBatchProcessor:
                         batch_info.error_claims += 1
                     
                     # Log progress
-                    if i % 10 == 0 or i == len(encounter_ids):
-                        progress = (i / len(encounter_ids)) * 100
-                        logger.info(f"Batch {batch_id} progress: {i}/{len(encounter_ids)} ({progress:.1f}%)")
+                    if i % 10 == 0 or i == len(clean_encounter_ids):
+                        progress = (i / len(clean_encounter_ids)) * 100
+                        logger.info(f"Batch {batch_id} progress: {i}/{len(clean_encounter_ids)} ({progress:.1f}%)")
                 
                 except Exception as e:
                     logger.error(f"Error processing claim {encounter_id} in batch {batch_id}: {e}")
@@ -441,11 +963,19 @@ class AutomatedBatchProcessor:
             },
             "stage_data": {},
             "enhanced_validations": {},
-            "database_update_status": False
+            "database_update_status": False,
+            "duplicate_detection_passed": True,
+            "existing_duplicate_flag": None
         }
         
         try:
             logger.debug(f"Starting complete processing pipeline for {encounter_id}")
+            
+            # Check if claim was already flagged during duplicate detection
+            existing_flag_reason = await self.get_claim_existing_flag_reason(encounter_id)
+            if existing_flag_reason:
+                pipeline_results["existing_duplicate_flag"] = existing_flag_reason
+                logger.info(f"Found existing duplicate flag for {encounter_id}")
             
             # STAGE 1: INITIAL PROCESSING
             stage_result = await self._stage1_initial_processing(encounter_id, pipeline_results)
@@ -552,10 +1082,13 @@ class AutomatedBatchProcessor:
     
     async def _finalize_with_database_update(self, encounter_id: str, processing_outcome: ProcessingOutcome, 
                                            pipeline_results: Dict, start_time: float) -> ProcessingOutcome:
-        """Finalize processing with database update"""
+        """Finalize processing with database update - preserves duplicate detection flag reasons"""
         try:
             logger.debug(f"Updating database for {encounter_id}")
 
+            # Check if there's an existing duplicate flag reason to preserve
+            existing_duplicate_flag = pipeline_results.get("existing_duplicate_flag")
+            
             if pipeline_results.get("flagged_at_stage"):
                 processing_outcome.overall_result = ValidationResult.FLAGGED
                 processing_outcome.reason = f"Flagged: Manual review required"
@@ -569,22 +1102,51 @@ class AutomatedBatchProcessor:
                     "requires_manual_review": True
                 })
             
-            # Update database with results using the database updater
-            if processing_outcome.overall_result == ValidationResult.FLAGGED:
+            # CRITICAL FIX: Preserve existing duplicate detection flag if it exists
+            if existing_duplicate_flag and processing_outcome.overall_result == ValidationResult.FLAGGED:
+                # We have both duplicate flag and validation stage flag - need to merge them
+                merged_flag_reason = self._merge_flag_reasons(existing_duplicate_flag, processing_outcome, pipeline_results)
+                
+                # Create a flagged outcome that preserves duplicate information
                 flagged_db_outcome = ProcessingOutcome(
                     encounter_id=encounter_id,
                     overall_result=ValidationResult.FLAGGED,
                     processing_stage=processing_outcome.processing_stage,
-                    reason="Flagged: Manual review required",
-                    details=processing_outcome.details
+                    reason="Combined: Duplicate detection + validation issues",
+                    details={
+                        **processing_outcome.details,
+                        "merged_flag_reason": merged_flag_reason,
+                        "has_duplicate_flag": True,
+                        "has_validation_flag": True
+                    }
                 )
-                db_update_success = await self.database_updater.update_claim_processing_results(flagged_db_outcome)
-            else:
+                
+                # Update the database with merged flag reason
+                db_update_success = await self._update_with_merged_flag_reason(encounter_id, flagged_db_outcome, merged_flag_reason)
+                
+            elif existing_duplicate_flag:
+                # Only duplicate flag exists, preserve it entirely
+                logger.info(f"Preserving existing duplicate flag for {encounter_id}")
                 db_update_success = await self.database_updater.update_claim_processing_results(processing_outcome)
+                # Don't overwrite the existing flag_reason - it's already set correctly
+                
+            else:
+                # No existing duplicate flag, proceed normally
+                if processing_outcome.overall_result == ValidationResult.FLAGGED:
+                    flagged_db_outcome = ProcessingOutcome(
+                        encounter_id=encounter_id,
+                        overall_result=ValidationResult.FLAGGED,
+                        processing_stage=processing_outcome.processing_stage,
+                        reason="Flagged: Manual review required",
+                        details=processing_outcome.details
+                    )
+                    db_update_success = await self.database_updater.update_claim_processing_results(flagged_db_outcome)
+                else:
+                    db_update_success = await self.database_updater.update_claim_processing_results(processing_outcome)
             
             # CRITICAL: Update claim_status to 'processed' after successful processing
             if db_update_success:
-                await self._update_claim_status_to_processed(encounter_id, processing_outcome, pipeline_results)
+                await self._update_claim_status_to_processed(encounter_id, processing_outcome, pipeline_results, existing_duplicate_flag)
             
             # Update the outcome with database status
             processing_outcome.database_updated = db_update_success
@@ -614,8 +1176,89 @@ class AutomatedBatchProcessor:
                 processing_outcome.details["database_updated"] = False
             
             return processing_outcome
+
+    def _merge_flag_reasons(self, existing_duplicate_flag: Dict[str, Any], processing_outcome: ProcessingOutcome, pipeline_results: Dict) -> Dict[str, Any]:
+        """
+        Merge existing duplicate flag with new validation flag reasons
+        Priority: Keep duplicate detection info intact, add validation issues as additional context
+        """
+        try:
+            # Start with the existing duplicate flag structure
+            merged_flag = existing_duplicate_flag.copy()
+            
+            # Add validation stage information as additional context
+            validation_context = {
+                "validation_stage_failure": {
+                    "failed_stage": pipeline_results.get('flagged_at_stage', 'unknown'),
+                    "failure_reason": pipeline_results.get('flag_reason', 'Validation failure'),
+                    "stages_completed": pipeline_results.get('stages_completed', []),
+                    "stages_passed": pipeline_results.get('stages_passed', []),
+                    "stages_failed": pipeline_results.get('stages_failed', []),
+                    "enhanced_validations": pipeline_results.get('enhanced_validations', {}),
+                    "processing_outcome": processing_outcome.reason
+                },
+                "combined_flag_info": {
+                    "primary_issue": "DUPLICATE_DETECTION",
+                    "secondary_issue": "VALIDATION_FAILURE",
+                    "requires_review_for": ["duplicate_verification", "validation_issues"],
+                    "priority": "HIGH"
+                }
+            }
+            
+            # Update the merged flag details
+            if "details" in merged_flag:
+                merged_flag["details"].update({
+                    "additional_validation_context": validation_context,
+                    "combined_flag": True,
+                    "duplicate_plus_validation_failure": True
+                })
+            else:
+                merged_flag["details"] = validation_context
+            
+            # Update the reason to reflect both issues
+            original_reason = merged_flag.get("reason", "")
+            merged_flag["reason"] = f"{original_reason} + Additional validation failure at {pipeline_results.get('flagged_at_stage', 'unknown stage')}"
+            
+            # Update timestamp
+            merged_flag["timestamp"] = datetime.now().isoformat()
+            
+            logger.info(f"Merged duplicate flag with validation failure for {processing_outcome.encounter_id}")
+            return merged_flag
+            
+        except Exception as e:
+            logger.error(f"Error merging flag reasons: {e}")
+            # If merge fails, return the original duplicate flag
+            return existing_duplicate_flag
+
+    async def _update_with_merged_flag_reason(self, encounter_id: str, processing_outcome: ProcessingOutcome, merged_flag_reason: Dict[str, Any]) -> bool:
+        """
+        Update database with merged flag reason that preserves duplicate detection info
+        """
+        try:
+            # Convert merged flag reason to JSON for database storage
+            merged_flag_json = json.dumps(merged_flag_reason, default=str)
+            
+            # Update the claims table with the merged flag reason
+            query = """
+            UPDATE claims_v3 
+            SET 
+                processed_status = 'flagged',
+                flag_reason = $2,
+                flagged_at = CURRENT_TIMESTAMP,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE encounter_id = $1
+            """
+            
+            await self.queries.db.execute(query, encounter_id, merged_flag_json)
+            
+            logger.info(f"Updated {encounter_id} with merged flag reason (duplicate + validation)")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error updating merged flag reason for {encounter_id}: {e}")
+            return False
     
-    async def _update_claim_status_to_processed(self, encounter_id: str, processing_outcome: ProcessingOutcome, pipeline_results: Dict):
+    async def _update_claim_status_to_processed(self, encounter_id: str, processing_outcome: ProcessingOutcome, pipeline_results: Dict, existing_duplicate_flag: Optional[Dict[str, Any]] = None):
         """Update claim_status to 'processed' and set processed_status with proper reasons"""
         try:
             # Map ValidationResult to database processed_status values
@@ -657,70 +1300,121 @@ class AutomatedBatchProcessor:
             total_flagged = amount_breakdown['flagged'] if processed_status == 'flagged' else 0.0
             total_pending = amount_breakdown['pending'] if processed_status == 'partially_approved' else 0.0
             
-            # Build rejection/flag reasons
+            # Build rejection/flag reasons - CRITICAL: Don't overwrite duplicate flag reasons
             rejection_reasons = None
             flag_reasons = None
             clinical_flags = None
             review_required = False
             
-            if processed_status == 'rejected':
+            # Handle flag reasons carefully to preserve duplicate detection info
+            if processed_status == 'flagged':
+                if existing_duplicate_flag:
+                    # Don't create new flag_reasons - the duplicate flag is already properly set
+                    logger.info(f"Preserving existing duplicate flag reason for {encounter_id}")
+                    flag_reasons = None  # Let existing flag_reason stay intact
+                else:
+                    # Only create new flag_reasons if no duplicate flag exists
+                    flag_reasons = {
+                        'reason': processing_outcome.reason, 
+                        'details': pipeline_results,
+                        'flagged_at_stage': pipeline_results.get('flagged_at_stage'),
+                        'flag_reason': pipeline_results.get('flag_reason')
+                    }
+                    
+                clinical_flags = pipeline_results.get('enhanced_validations', {})
+                review_required = True
+                
+            elif processed_status == 'rejected':
                 rejection_reasons = {
                     'reason': processing_outcome.reason, 
                     'details': pipeline_results,
                     'failed_stage': pipeline_results.get('stages_failed', [])[-1] if pipeline_results.get('stages_failed') else None
                 }
-            elif processed_status == 'flagged':
-                flag_reasons = {
-                    'reason': processing_outcome.reason, 
-                    'details': pipeline_results,
-                    'flagged_at_stage': pipeline_results.get('flagged_at_stage'),
-                    'flag_reason': pipeline_results.get('flag_reason')
-                }
-                clinical_flags = pipeline_results.get('enhanced_validations', {})
-                review_required = True
             
             # CRITICAL UPDATE: Change claim_status to 'processed' and set all required fields
-            query = """
-            UPDATE claims_v3 
-            SET claim_status = 'processed',
-                processed_status = $2,
-                total_claimed_amount = $3,
-                total_approved_amount = $4,
-                total_rejected_amount = $5,
-                total_pending_amount = $6,
-                total_flagged_amount = $7,
-                amount_breakdown = $8,
-                validation_results = $9,
-                rejection_reasons = $10,
-                flag_reasons = $11,
-                clinical_flags = $12,
-                processing_engine_version = 'v2.0',
-                processed_by = 'NHIS_EXPERT_SYSTEM',
-                auto_processed = true,
-                review_required = $13,
-                processing_completed_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE encounter_id = $1
-            """
+            # But be careful with flag_reason updates
+            if existing_duplicate_flag and processed_status == 'flagged':
+                # Don't overwrite flag_reason if duplicate flag exists
+                query = """
+                UPDATE claims_v3 
+                SET claim_status = 'processed',
+                    processed_status = $2,
+                    total_claimed_amount = $3,
+                    total_approved_amount = $4,
+                    total_rejected_amount = $5,
+                    total_pending_amount = $6,
+                    total_flagged_amount = $7,
+                    amount_breakdown = $8,
+                    validation_results = $9,
+                    rejection_reasons = $10,
+                    clinical_flags = $11,
+                    processing_engine_version = 'v2.0',
+                    processed_by = 'NHIS_EXPERT_SYSTEM',
+                    auto_processed = true,
+                    review_required = $12,
+                    processing_completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE encounter_id = $1
+                """
+                
+                await self.queries.db.execute(
+                    query,
+                    encounter_id,
+                    processed_status,
+                    amount_breakdown['total_claimed'],
+                    total_approved,
+                    total_rejected, 
+                    total_pending,
+                    total_flagged,
+                    json.dumps(amount_breakdown),
+                    json.dumps(validation_results),
+                    json.dumps(rejection_reasons) if rejection_reasons else None,
+                    json.dumps(clinical_flags) if clinical_flags else None,
+                    review_required
+                )
+            else:
+                # Normal update including flag_reason
+                query = """
+                UPDATE claims_v3 
+                SET claim_status = 'processed',
+                    processed_status = $2,
+                    total_claimed_amount = $3,
+                    total_approved_amount = $4,
+                    total_rejected_amount = $5,
+                    total_pending_amount = $6,
+                    total_flagged_amount = $7,
+                    amount_breakdown = $8,
+                    validation_results = $9,
+                    rejection_reasons = $10,
+                    flag_reasons = $11,
+                    clinical_flags = $12,
+                    processing_engine_version = 'v2.0',
+                    processed_by = 'NHIS_EXPERT_SYSTEM',
+                    auto_processed = true,
+                    review_required = $13,
+                    processing_completed_at = CURRENT_TIMESTAMP,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE encounter_id = $1
+                """
+                
+                await self.queries.db.execute(
+                    query,
+                    encounter_id,
+                    processed_status,
+                    amount_breakdown['total_claimed'],
+                    total_approved,
+                    total_rejected, 
+                    total_pending,
+                    total_flagged,
+                    json.dumps(amount_breakdown),
+                    json.dumps(validation_results),
+                    json.dumps(rejection_reasons) if rejection_reasons else None,
+                    json.dumps(flag_reasons) if flag_reasons else None,
+                    json.dumps(clinical_flags) if clinical_flags else None,
+                    review_required
+                )
             
-            await self.queries.db.execute(
-                query,
-                encounter_id,
-                processed_status,
-                amount_breakdown['total_claimed'],
-                total_approved,
-                total_rejected, 
-                total_pending,
-                total_flagged,
-                json.dumps(amount_breakdown),
-                json.dumps(validation_results),
-                json.dumps(rejection_reasons) if rejection_reasons else None,
-                json.dumps(flag_reasons) if flag_reasons else None,
-                json.dumps(clinical_flags) if clinical_flags else None,
-                review_required
-            )
-            
-            logger.debug(f"Claim {encounter_id} status updated: claim_status='processed', processed_status='{processed_status}'")
+            logger.debug(f"Claim {encounter_id} status updated: claim_status='processed', processed_status='{processed_status}' (preserved duplicate flag: {existing_duplicate_flag is not None})")
             
         except Exception as e:
             logger.error(f"Error updating claim status for {encounter_id}: {e}")
@@ -1009,6 +1703,11 @@ class AutomatedBatchProcessor:
                     "reason": f"Enhanced validations passed with flags: {', '.join(flagged_validations)}"
                 })
                 
+                # Set flagged stage info for proper flag reason creation
+                if not pipeline_results.get("flagged_at_stage"):
+                    pipeline_results["flagged_at_stage"] = "stage2_enhanced_validations"
+                    pipeline_results["flag_reason"] = f"Enhanced validations flagged: {', '.join(flagged_validations)}"
+                
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
                     overall_result=ValidationResult.FLAGGED,
@@ -1040,472 +1739,3 @@ class AutomatedBatchProcessor:
                 processing_stage=ProcessingStage.ENHANCED_VALIDATIONS,
                 reason=f"Stage 2 error: {str(e)}"
             )
-    
-    async def _stage3_encounter_flow(self, encounter_id: str, encounter_type: str, pipeline_results: Dict) -> ProcessingOutcome:
-        """Stage 3: Encounter-Specific Flow"""
-        try:
-            pipeline_results["stages_completed"].append("stage3_encounter_flow")
-            
-            if encounter_type == "A&E":
-                pipeline_results["processing_path"].append("A&E Flow")
-                result = await self.ae_validator.process_ae_flow_validation(encounter_id)
-            elif encounter_type == "OPD":
-                pipeline_results["processing_path"].append("OPD Flow")
-                result = await self.opd_validator.process_opd_flow_validation(encounter_id)
-            elif encounter_type == "IPD":
-                pipeline_results["processing_path"].append("IPD Flow")
-                result = await self.ipd_validator.process_ipd_flow_validation(encounter_id)
-            else:
-                raise ValueError(f"Unknown encounter type: {encounter_type}")
-            
-            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
-            
-            if result_value in ["APPROVED", "FLAGGED"]:
-                pipeline_results["stages_passed"].append({
-                    "stage": "stage3_encounter_flow",
-                    "flow_type": encounter_type,
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=ValidationResult.APPROVED,
-                    processing_stage=ProcessingStage.ENCOUNTER_FLOW,
-                    reason=f"Stage 3 passed: {encounter_type} flow completed",
-                    details={
-                        "encounter_type": encounter_type,
-                        "stage3_details": result.details
-                    }
-                )
-            else:
-                pipeline_results["stages_failed"].append({
-                    "stage": "stage3_encounter_flow",
-                    "flow_type": encounter_type,
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                try:
-                    result_enum = ValidationResult(result_value)
-                except ValueError:
-                    result_enum = ValidationResult.FLAGGED
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=result_enum,
-                    processing_stage=ProcessingStage.ENCOUNTER_FLOW,
-                    reason=f"Stage 3 failed: {result.reason}",
-                    details={"stage3_details": result.details}
-                )
-        
-        except Exception as e:
-            logger.error(f"Error in Stage 3: {e}")
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=ValidationResult.FLAGGED,
-                processing_stage=ProcessingStage.ENCOUNTER_FLOW,
-                reason=f"Stage 3 error: {str(e)}"
-            )
-    
-    async def _stage4_credentialing(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
-        """Stage 4: Credentialing Check"""
-        try:
-            pipeline_results["stages_completed"].append("stage4_credentialing")
-            pipeline_results["processing_path"].append("Credentialing")
-            
-            result = await self.credentialing_validator.process_step4_credentialing_check(encounter_id)
-            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
-            
-            if result_value == "APPROVED":
-                pipeline_results["stages_passed"].append({
-                    "stage": "stage4_credentialing",
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=ValidationResult.APPROVED,
-                    processing_stage=ProcessingStage.CREDENTIALING,
-                    reason="Stage 4 passed: Credentialing validated",
-                    details={"stage4_details": result.details}
-                )
-            else:
-                pipeline_results["stages_failed"].append({
-                    "stage": "stage4_credentialing",
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                try:
-                    result_enum = ValidationResult(result_value)
-                except ValueError:
-                    result_enum = ValidationResult.FLAGGED
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=result_enum,
-                    processing_stage=ProcessingStage.CREDENTIALING,
-                    reason=f"Stage 4 failed: {result.reason}",
-                    details={"stage4_details": result.details}
-                )
-        
-        except Exception as e:
-            logger.error(f"Error in Stage 4: {e}")
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=ValidationResult.FLAGGED,
-                processing_stage=ProcessingStage.CREDENTIALING,
-                reason=f"Stage 4 error: {str(e)}"
-            )
-    
-    async def _stage5_gdrg_determination(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
-        """Stage 5: G-DRG Determination with OPDC13A handling"""
-        try:
-            pipeline_results["stages_completed"].append("stage5_gdrg_determination")
-            pipeline_results["processing_path"].append("G-DRG Determination")
-            
-            result = await self.gdrg_determiner.process_step5_gdrg_determination(encounter_id)
-            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
-
-            if result_value == "FLAGGED":
-                if not pipeline_results.get("flagged_at_stage"):
-                    pipeline_results["flagged_at_stage"] = "stage5_gdrg_determination"
-                    pipeline_results["flag_reason"] = result.reason
-            
-            # Check for OPDC13A special case
-            if result_value == "FLAGGED" and result.details:
-                # Check for OPDC13A in G-DRG determination
-                gdrg_determination = result.details.get('gdrg_determination', {})
-                if gdrg_determination and gdrg_determination.get('final_gdrg') == 'OPDC13A':
-                    logger.warning(f"OPDC13A flagged - Will stop processing after this stage for {encounter_id}")
-                    
-                    pipeline_results["stages_passed"].append({
-                        "stage": "stage5_gdrg_determination", 
-                        "result": result_value,
-                        "reason": f"{result.reason} - OPDC13A DETECTED",
-                        "opdc13a_detected": True
-                    })
-                    
-                    return ProcessingOutcome(
-                        encounter_id=encounter_id,
-                        overall_result=ValidationResult.FLAGGED,
-                        processing_stage=ProcessingStage.GDRG_DETERMINATION,
-                        reason="Stage 5 flagged: OPDC13A detected - Manual review required",
-                        details={"stage5_details": result.details}
-                    )
-                
-                # Check step-by-step results for OPDC13A
-                step_results = result.details.get('step_by_step_results', {})
-                if step_results.get('special_case_triggered'):
-                    special_case_details = step_results.get('special_case_details', {})
-                    if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
-                        logger.warning(f"OPDC13A special case flagged - Will stop processing after this stage for {encounter_id}")
-                        
-                        pipeline_results["stages_passed"].append({
-                            "stage": "stage5_gdrg_determination",
-                            "result": result_value,
-                            "reason": f"{result.reason} - OPDC13A SPECIAL CASE",
-                            "opdc13a_detected": True
-                        })
-                        
-                        return ProcessingOutcome(
-                            encounter_id=encounter_id,
-                            overall_result=ValidationResult.FLAGGED,
-                            processing_stage=ProcessingStage.GDRG_DETERMINATION,
-                            reason="Stage 5 flagged: OPDC13A special case - Supporting documents required",
-                            details={"stage5_details": result.details}
-                        )
-            
-            # Handle successful results (APPROVED and non-OPDC13A FLAGGED)
-            if result_value in ["APPROVED", "FLAGGED"]:
-                pipeline_results["stages_passed"].append({
-                    "stage": "stage5_gdrg_determination",
-                    "result": result_value,
-                    "reason": result.reason,
-                    "flagged": result_value == "FLAGGED"
-                })
-                
-                outcome_result = ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED
-                stage_reason = "Stage 5 passed: G-DRG determined" if result_value == "APPROVED" else "Stage 5 flagged: G-DRG requires manual review"
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=outcome_result,
-                    processing_stage=ProcessingStage.GDRG_DETERMINATION,
-                    reason=stage_reason,
-                    details={"stage5_details": result.details}
-                )
-            else:
-                pipeline_results["stages_failed"].append({
-                    "stage": "stage5_gdrg_determination",
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                try:
-                    result_enum = ValidationResult(result_value)
-                except ValueError:
-                    result_enum = ValidationResult.FLAGGED
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=result_enum,
-                    processing_stage=ProcessingStage.GDRG_DETERMINATION,
-                    reason=f"Stage 5 failed: {result.reason}",
-                    details={"stage5_details": result.details}
-                )
-        
-        except Exception as e:
-            logger.error(f"Error in Stage 5: {e}")
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=ValidationResult.FLAGGED,
-                processing_stage=ProcessingStage.GDRG_DETERMINATION,
-                reason=f"Stage 5 error: {str(e)}"
-            )
-    
-    async def _stage6_medicine_validation(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
-        """Stage 6: Medicine Validation"""
-        try:
-            pipeline_results["stages_completed"].append("stage6_medicine_validation")
-            pipeline_results["processing_path"].append("Medicine Validation")
-            
-            result = await self.medicine_validator.process_step6_medicine_validation(encounter_id)
-            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
-            
-            if result_value in ["APPROVED", "PARTIAL"]:
-                pipeline_results["stages_passed"].append({
-                    "stage": "stage6_medicine_validation",
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=ValidationResult.APPROVED,
-                    processing_stage=ProcessingStage.MEDICINE_VALIDATION,
-                    reason="Stage 6 passed: Medicine validation completed",
-                    details={"stage6_details": result.details}
-                )
-            else:
-                pipeline_results["stages_failed"].append({
-                    "stage": "stage6_medicine_validation",
-                    "result": result_value,
-                    "reason": result.reason
-                })
-                
-                try:
-                    result_enum = ValidationResult(result_value)
-                except ValueError:
-                    result_enum = ValidationResult.FLAGGED
-                
-                return ProcessingOutcome(
-                    encounter_id=encounter_id,
-                    overall_result=result_enum,
-                    processing_stage=ProcessingStage.MEDICINE_VALIDATION,
-                    reason=f"Stage 6 failed: {result.reason}",
-                    details={"stage6_details": result.details}
-                )
-        
-        except Exception as e:
-            logger.error(f"Error in Stage 6: {e}")
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=ValidationResult.FLAGGED,
-                processing_stage=ProcessingStage.MEDICINE_VALIDATION,
-                reason=f"Stage 6 error: {str(e)}"
-            )
-    
-    async def _stage7_final_processing(self, encounter_id: str, pipeline_results: Dict) -> ProcessingOutcome:
-        """Stage 7: Final Processing"""
-        try:
-            pipeline_results["stages_completed"].append("stage7_final_processing")
-            pipeline_results["processing_path"].append("Final Processing")
-            
-            result = await self.final_processor.process_final_validation(encounter_id, pipeline_results["stage_data"])
-            
-            # Extract financial information
-            if result.details and result.details.get('amounts'):
-                pipeline_results["amounts"] = result.details['amounts']
-            
-            if result.details and result.details.get('final_decision'):
-                pipeline_results["final_decision"] = result.details['final_decision']
-            
-            result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
-            pipeline_results["overall_result"] = result_value
-            
-            pipeline_results["stages_passed"].append({
-                "stage": "stage7_final_processing",
-                "result": result_value,
-                "reason": result.reason
-            })
-            
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=result.result,
-                processing_stage=ProcessingStage.FINAL_PROCESSING,
-                reason="Stage 7 completed: Final processing finished",
-                details={"stage7_details": result.details}
-            )
-        
-        except Exception as e:
-            logger.error(f"Error in Stage 7: {e}")
-            return ProcessingOutcome(
-                encounter_id=encounter_id,
-                overall_result=ValidationResult.FLAGGED,
-                processing_stage=ProcessingStage.FINAL_PROCESSING,
-                reason=f"Stage 7 error: {str(e)}"
-            )
-    
-    async def process_all_batches(self) -> List[BatchInfo]:
-        """Process all available batches automatically"""
-        try:
-            batch_ids = await self.get_batches_to_process()
-            
-            if not batch_ids:
-                logger.info("No batches with submitted claims found for processing")
-                return []
-            
-            logger.info(f"Starting automated processing of {len(batch_ids)} batches")
-            
-            processed_batches = []
-            
-            for i, batch_id in enumerate(batch_ids, 1):
-                try:
-                    logger.info(f"Processing batch {i}/{len(batch_ids)}: {batch_id}")
-                    
-                    batch_info = await self.process_batch(batch_id)
-                    processed_batches.append(batch_info)
-                    
-                    # Log batch completion
-                    logger.info(f"Batch {batch_id} completed: {batch_info.approved_claims} approved, "
-                              f"{batch_info.rejected_claims} rejected, {batch_info.flagged_claims} flagged, "
-                              f"{batch_info.partial_claims} partial, {batch_info.error_claims} errors")
-                
-                except Exception as e:
-                    logger.error(f"Error processing batch {batch_id}: {e}")
-                    
-                    # Create error batch info
-                    error_batch = BatchInfo(
-                        batch_id=batch_id,
-                        total_claims=0,
-                        error_claims=1,
-                        end_time=datetime.now()
-                    )
-                    processed_batches.append(error_batch)
-            
-            # Summary statistics
-            total_claims = sum(batch.total_claims for batch in processed_batches)
-            total_approved = sum(batch.approved_claims for batch in processed_batches)
-            total_rejected = sum(batch.rejected_claims for batch in processed_batches)
-            total_flagged = sum(batch.flagged_claims for batch in processed_batches)
-            total_partial = sum(batch.partial_claims for batch in processed_batches)
-            total_errors = sum(batch.error_claims for batch in processed_batches)
-            
-            logger.info(f"All batches processing completed:")
-            logger.info(f"  Total Batches: {len(processed_batches)}")
-            logger.info(f"  Total Claims: {total_claims}")
-            logger.info(f"  Approved: {total_approved}")
-            logger.info(f"  Rejected: {total_rejected}")
-            logger.info(f"  Flagged: {total_flagged}")
-            logger.info(f"  Partial: {total_partial}")
-            logger.info(f"  Errors: {total_errors}")
-            
-            approval_rate = (total_approved / total_claims * 100) if total_claims > 0 else 0
-            logger.info(f"  Overall Approval Rate: {approval_rate:.1f}%")
-            
-            return processed_batches
-            
-        except Exception as e:
-            logger.error(f"Error in automated batch processing: {e}")
-            return []
-
-    async def process_specific_batch(self, batch_id: str) -> BatchInfo:
-        """Process a specific batch by batch_id"""
-        try:
-            logger.info(f"Starting processing of specific batch: {batch_id}")
-            
-            batch_info = await self.process_batch(batch_id)
-            
-            logger.info(f"Batch {batch_id} processing completed:")
-            logger.info(f"  Total Claims: {batch_info.total_claims}")
-            logger.info(f"  Approved: {batch_info.approved_claims}")
-            logger.info(f"  Rejected: {batch_info.rejected_claims}")
-            logger.info(f"  Flagged: {batch_info.flagged_claims}")
-            logger.info(f"  Partial: {batch_info.partial_claims}")
-            logger.info(f"  Errors: {batch_info.error_claims}")
-            
-            return batch_info
-            
-        except Exception as e:
-            logger.error(f"Error processing specific batch {batch_id}: {e}")
-            return BatchInfo(
-                batch_id=batch_id,
-                total_claims=0,
-                error_claims=1,
-                end_time=datetime.now()
-            )
-
-
-async def main():
-    """Main entry point for automated batch processing"""
-    processor = AutomatedBatchProcessor()
-    
-    try:
-        await processor.initialize()
-        
-        logger.info("NHIS Automated Batch Claims Processor Started")
-        logger.info("Processing all batches with submitted claims...")
-        
-        # Process all available batches
-        processed_batches = await processor.process_all_batches()
-        
-        if processed_batches:
-            logger.info(f"Processing completed for {len(processed_batches)} batches")
-        else:
-            logger.info("No batches were processed")
-        
-    except Exception as e:
-        logger.error(f"Critical error in automated processing: {e}")
-        raise
-    
-    finally:
-        await processor.close()
-
-
-async def process_specific_batch_main(batch_id: str):
-    """Process a specific batch by batch_id"""
-    processor = AutomatedBatchProcessor()
-    
-    try:
-        await processor.initialize()
-        
-        logger.info(f"NHIS Automated Batch Claims Processor Started for batch: {batch_id}")
-        
-        # Process specific batch
-        batch_info = await processor.process_specific_batch(batch_id)
-        
-        return batch_info
-        
-    except Exception as e:
-        logger.error(f"Critical error processing batch {batch_id}: {e}")
-        raise
-    
-    finally:
-        await processor.close()
-
-
-if __name__ == "__main__":
-    import sys
-    
-    if len(sys.argv) > 1:
-        # Process specific batch if batch_id provided as argument
-        batch_id = sys.argv[1]
-        logger.info(f"Processing specific batch: {batch_id}")
-        asyncio.run(process_specific_batch_main(batch_id))
-    else:
-        # Process all available batches
-        logger.info("Processing all available batches")
-        asyncio.run(main())

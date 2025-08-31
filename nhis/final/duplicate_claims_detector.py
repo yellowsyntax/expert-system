@@ -71,20 +71,56 @@ class DuplicateClaimsDetector:
         self.queries = None
         self.is_initialized = False
         
-        # Fields to compare for duplicates
+        # Fields to compare for duplicates - ALL fields from schema
         self.critical_fields = [
+            # Patient identifying fields
             'last_name', 'other_names', 'date_of_birth', 'gender', 'nhis_number',
-            'diagnosis_name', 'icd10_code', 'gdrg_code', 'medicine_name',
-            'admission_date', 'discharge_date', 'encounter_type'
+            
+            # Provider fields
+            'provider_id', 'provider_name', 'district', 'provider_type', 
+            'healthcare_level', 'prescriber_level',
+            
+            # Encounter fields
+            'encounter_id', 'encounter_type', 'admission_date', 'discharge_date',
+            'service_type_1', 'service_type_2', 'service_outcome', 'attendance_type',
+            'specialties_attended', 'specialty_code',
+            
+            # Diagnosis fields
+            'diagnosis_name', 'icd10_diagnosis', 'icd10_code', 'g_drg_diagnosis',
+            'gdrg_code', 'gdrg_description',
+            
+            # Procedure fields
+            'procedure_name', 'icd10_procedure', 'icd10_code_procedure',
+            'icd10_description_procedure', 'specialty_code_procedure',
+            'g_drg_procedure', 'gdrg_code_procedure', 'gdrg_description_procedure',
+            'level_procedure', 'procedure_date',
+            
+            # Medicine fields
+            'medicine_code', 'medicine_name', 'medicine_code_procedure',
+            'medicine_name_procedure', 'dosage', 'standard_dosage',
+            'standard_dosage_procedure', 'frequency', 'frequency_procedure',
+            'duration', 'duration_days', 'duration_days_procedure', 'medicine_date',
+            
+            # Investigation fields
+            'g_drg_inve', 'description_inve'
         ]
         
+        # Patient identifying fields (high priority for duplicate detection)
         self.identifying_fields = [
-            'last_name', 'other_names', 'date_of_birth', 'gender'
+            'last_name', 'other_names', 'date_of_birth', 'gender', 'nhis_number'
         ]
         
+        # Clinical core fields (medium priority)
         self.clinical_fields = [
-            'diagnosis_name', 'icd10_code', 'gdrg_code', 'medicine_name',
+            'diagnosis_name', 'icd10_diagnosis', 'icd10_code', 'gdrg_code',
+            'procedure_name', 'icd10_procedure', 'medicine_name', 'medicine_code',
             'standard_dosage', 'frequency', 'duration_days'
+        ]
+        
+        # Administrative fields (lower priority but important for context)
+        self.administrative_fields = [
+            'provider_id', 'provider_name', 'encounter_type', 'admission_date',
+            'discharge_date', 'service_type_1', 'service_type_2'
         ]
         
         # Confidence thresholds
@@ -180,59 +216,55 @@ class DuplicateClaimsDetector:
     
     async def _detect_different_encounter_same_info(self, claim: Dict) -> List[DuplicateMatch]:
         """
-        Type 1: Different encounter_id but same information
+        Type 1: Different encounter_id but same information - using ALL fields
         """
         try:
             encounter_id = claim['encounter_id']
             
-            # Create signature of critical claim information
-            claim_signature = self._create_claim_signature(claim, self.critical_fields)
-            
-            # Find other claims with same signature but different encounter_id
+            # Find other claims with same core patient and clinical info but different encounter_id
             query = """
             SELECT 
-                encounter_id,
-                last_name,
-                other_names,
-                date_of_birth,
-                gender,
-                nhis_number,
-                diagnosis_name,
-                icd10_code,
-                gdrg_code,
-                medicine_name,
-                admission_date,
-                discharge_date,
-                encounter_type,
-                provider_name,
-                submitted_at
+                provider_id, provider_name, district, provider_type, healthcare_level, prescriber_level,
+                last_name, other_names, date_of_birth, gender, nhis_number,
+                encounter_id, encounter_type, admission_date, discharge_date,
+                service_type_1, service_type_2, service_outcome, attendance_type,
+                specialties_attended, specialty_code,
+                diagnosis_name, icd10_diagnosis, icd10_code, g_drg_diagnosis, gdrg_code, gdrg_description,
+                procedure_name, icd10_procedure, icd10_code_procedure, icd10_description_procedure,
+                specialty_code_procedure, g_drg_procedure, gdrg_code_procedure, gdrg_description_procedure,
+                level_procedure, procedure_date,
+                medicine_code, medicine_name, medicine_code_procedure, medicine_name_procedure,
+                dosage, standard_dosage, standard_dosage_procedure, frequency, frequency_procedure,
+                duration, duration_days, duration_days_procedure, medicine_date,
+                g_drg_inve, description_inve, submitted_at
             FROM claims_v3 
             WHERE encounter_id != $1
             AND last_name = $2
             AND other_names = $3
             AND date_of_birth = $4
             AND gender = $5
-            AND diagnosis_name = $6
-            AND icd10_code = $7
-            AND gdrg_code = $8
+            AND COALESCE(diagnosis_name, '') = COALESCE($6, '')
+            AND COALESCE(icd10_code, '') = COALESCE($7, '')
+            AND COALESCE(gdrg_code, '') = COALESCE($8, '')
             ORDER BY submitted_at DESC
+            LIMIT 50
             """
             
             potential_duplicates = await self.queries.db.fetch_all(
                 query,
                 encounter_id,
-                claim['last_name'],
-                claim['other_names'], 
-                claim['date_of_birth'],
-                claim['gender'],
-                claim['diagnosis_name'],
-                claim['icd10_code'],
-                claim['gdrg_code']
+                claim.get('last_name', ''),
+                claim.get('other_names', ''), 
+                claim.get('date_of_birth'),
+                claim.get('gender', ''),
+                claim.get('diagnosis_name'),
+                claim.get('icd10_code'),
+                claim.get('gdrg_code')
             )
             
             matches = []
             for duplicate in potential_duplicates:
-                # Calculate detailed similarity
+                # Calculate detailed similarity across ALL fields
                 similarity_score, matching_fields, differing_fields = self._calculate_similarity(
                     claim, dict(duplicate), self.critical_fields
                 )
@@ -254,7 +286,10 @@ class DuplicateClaimsDetector:
                             "provider_duplicate": duplicate.get('provider_name'),
                             "submission_time_diff": self._calculate_time_diff(
                                 claim.get('submitted_at'), duplicate.get('submitted_at')
-                            )
+                            ),
+                            "matching_field_count": len(matching_fields),
+                            "differing_field_count": len(differing_fields),
+                            "key_differences": self._identify_key_differences(differing_fields)
                         }
                     )
                     matches.append(match)
@@ -268,7 +303,7 @@ class DuplicateClaimsDetector:
     
     async def _detect_same_encounter_different_info(self, claim: Dict) -> List[DuplicateMatch]:
         """
-        Type 2: Same encounter_id but different information
+        Type 2: Same encounter_id but different information - using ALL fields
         """
         try:
             encounter_id = claim['encounter_id']
@@ -276,24 +311,19 @@ class DuplicateClaimsDetector:
             # Find all claims with same encounter_id
             query = """
             SELECT 
-                encounter_id,
-                last_name,
-                other_names,
-                date_of_birth,
-                gender,
-                nhis_number,
-                diagnosis_name,
-                icd10_code,
-                gdrg_code,
-                medicine_name,
-                standard_dosage,
-                frequency,
-                duration_days,
-                admission_date,
-                discharge_date,
-                encounter_type,
-                provider_name,
-                submitted_at
+                provider_id, provider_name, district, provider_type, healthcare_level, prescriber_level,
+                last_name, other_names, date_of_birth, gender, nhis_number,
+                encounter_id, encounter_type, admission_date, discharge_date,
+                service_type_1, service_type_2, service_outcome, attendance_type,
+                specialties_attended, specialty_code,
+                diagnosis_name, icd10_diagnosis, icd10_code, g_drg_diagnosis, gdrg_code, gdrg_description,
+                procedure_name, icd10_procedure, icd10_code_procedure, icd10_description_procedure,
+                specialty_code_procedure, g_drg_procedure, gdrg_code_procedure, gdrg_description_procedure,
+                level_procedure, procedure_date,
+                medicine_code, medicine_name, medicine_code_procedure, medicine_name_procedure,
+                dosage, standard_dosage, standard_dosage_procedure, frequency, frequency_procedure,
+                duration, duration_days, duration_days_procedure, medicine_date,
+                g_drg_inve, description_inve, submitted_at
             FROM claims_v3 
             WHERE encounter_id = $1
             ORDER BY submitted_at ASC
@@ -307,7 +337,7 @@ class DuplicateClaimsDetector:
                 for i, claim1 in enumerate(same_encounter_claims):
                     for j, claim2 in enumerate(same_encounter_claims[i+1:], i+1):
                         
-                        # Calculate differences
+                        # Calculate differences across ALL fields
                         similarity_score, matching_fields, differing_fields = self._calculate_similarity(
                             dict(claim1), dict(claim2), self.critical_fields
                         )
@@ -332,7 +362,8 @@ class DuplicateClaimsDetector:
                                     "total_versions": len(same_encounter_claims),
                                     "version_index_1": i,
                                     "version_index_2": j,
-                                    "critical_differences": differing_fields
+                                    "critical_differences": differing_fields,
+                                    "data_integrity_issues": self._analyze_data_integrity_issues(differing_fields)
                                 }
                             )
                             matches.append(match)
@@ -543,21 +574,75 @@ class DuplicateClaimsDetector:
         return hashlib.sha256(hash_string.encode()).hexdigest()
     
     def _calculate_similarity(self, claim1: Dict, claim2: Dict, fields: List[str]) -> Tuple[float, List[str], List[str]]:
-        """Calculate similarity score between two claims"""
+        """
+        Calculate similarity score between two claims with intelligent null handling
+        """
         matching_fields = []
         differing_fields = []
+        valid_comparisons = 0  # Only count fields where at least one claim has a value
         
         for field in fields:
-            val1 = str(claim1.get(field, '')).strip().lower()
-            val2 = str(claim2.get(field, '')).strip().lower()
+            val1 = claim1.get(field)
+            val2 = claim2.get(field)
             
-            if val1 == val2:
+            # Smart null handling
+            val1_is_null = self._is_null_or_empty(val1)
+            val2_is_null = self._is_null_or_empty(val2)
+            
+            # If both values are null/empty, don't count this field in comparison
+            if val1_is_null and val2_is_null:
+                continue
+            
+            # Count this as a valid comparison since at least one has a value
+            valid_comparisons += 1
+            
+            # If one is null and other isn't, they differ
+            if val1_is_null != val2_is_null:
+                differing_fields.append(field)
+                continue
+            
+            # Both have values - normalize and compare
+            val1_norm = self._normalize_value(val1)
+            val2_norm = self._normalize_value(val2)
+            
+            if val1_norm == val2_norm:
                 matching_fields.append(field)
             else:
                 differing_fields.append(field)
         
-        similarity_score = len(matching_fields) / len(fields) if fields else 0.0
+        # Calculate similarity based only on valid comparisons
+        similarity_score = len(matching_fields) / valid_comparisons if valid_comparisons > 0 else 1.0
         return similarity_score, matching_fields, differing_fields
+    
+    def _is_null_or_empty(self, value) -> bool:
+        """
+        Check if a value should be considered null/empty for comparison purposes
+        """
+        if value is None:
+            return True
+        
+        if isinstance(value, str):
+            # Consider empty string, whitespace, or common null indicators as null
+            cleaned = value.strip().lower()
+            return cleaned == '' or cleaned in ['null', 'none', 'n/a', 'na', '-', '--', 'unknown']
+        
+        return False
+    
+    def _normalize_value(self, value) -> str:
+        """
+        Normalize a value for comparison (case-insensitive, trimmed)
+        """
+        if value is None:
+            return ""
+        
+        if isinstance(value, str):
+            return value.strip().lower()
+        
+        # Handle dates
+        if hasattr(value, 'isoformat'):
+            return value.isoformat()
+        
+        return str(value).strip().lower()
     
     def _calculate_patient_similarity(self, claim1: Dict, claim2: Dict) -> float:
         """Calculate how likely two claims are for the same patient"""
@@ -587,7 +672,93 @@ class DuplicateClaimsDetector:
         
         return min(legitimacy_score, 1.0)
     
-    def _calculate_time_diff(self, time1, time2) -> Optional[str]:
+    def _identify_key_differences(self, differing_fields: List[str]) -> Dict[str, str]:
+        """
+        Identify the most important differences between claims
+        """
+        key_differences = {}
+        
+        # Categorize differences by importance
+        critical_differences = []
+        important_differences = []
+        minor_differences = []
+        
+        for field in differing_fields:
+            if field in self.identifying_fields:
+                critical_differences.append(field)
+            elif field in self.clinical_fields:
+                important_differences.append(field)
+            elif field in self.administrative_fields:
+                minor_differences.append(field)
+            else:
+                important_differences.append(field)
+        
+        key_differences = {
+            "critical_patient_data": critical_differences,
+            "important_clinical_data": important_differences, 
+            "administrative_data": minor_differences,
+            "total_differences": len(differing_fields),
+            "severity": self._assess_difference_severity(critical_differences, important_differences, minor_differences)
+        }
+        
+        return key_differences
+    
+    def _analyze_data_integrity_issues(self, differing_fields: List[str]) -> Dict[str, Any]:
+        """
+        Analyze what type of data integrity issues exist
+        """
+        issues = {
+            "patient_identity_conflict": any(field in self.identifying_fields for field in differing_fields),
+            "clinical_data_conflict": any(field in self.clinical_fields for field in differing_fields),
+            "provider_data_conflict": any(field in ['provider_id', 'provider_name'] for field in differing_fields),
+            "temporal_data_conflict": any(field in ['admission_date', 'discharge_date', 'procedure_date', 'medicine_date'] for field in differing_fields),
+            "medication_conflict": any(field in ['medicine_name', 'dosage', 'frequency', 'duration_days'] for field in differing_fields),
+            "diagnosis_conflict": any(field in ['diagnosis_name', 'icd10_code', 'gdrg_code'] for field in differing_fields),
+            "procedure_conflict": any(field in ['procedure_name', 'icd10_procedure', 'icd10_code_procedure'] for field in differing_fields)
+        }
+        
+        # Determine overall severity
+        if issues["patient_identity_conflict"]:
+            issues["overall_severity"] = "CRITICAL"
+        elif issues["clinical_data_conflict"] or issues["diagnosis_conflict"]:
+            issues["overall_severity"] = "HIGH"
+        elif issues["medication_conflict"] or issues["procedure_conflict"]:
+            issues["overall_severity"] = "MEDIUM"
+        else:
+            issues["overall_severity"] = "LOW"
+        
+        return issues
+    
+    def _assess_difference_severity(self, critical: List[str], important: List[str], minor: List[str]) -> str:
+        """
+        Assess the severity of differences between claims
+        """
+        if len(critical) > 0:
+            return "CRITICAL"
+        elif len(important) > 3:
+            return "HIGH"
+        elif len(important) > 0:
+            return "MEDIUM"
+        else:
+            return "LOW"
+    
+    def _create_comprehensive_claim_signature(self, claim: Dict) -> str:
+        """
+        Create a comprehensive signature using ALL non-null fields for exact duplicate detection
+        """
+        signature_parts = []
+        
+        # Process all fields in a consistent order
+        for field in sorted(self.critical_fields):
+            value = claim.get(field)
+            if not self._is_null_or_empty(value):
+                normalized_value = self._normalize_value(value)
+                signature_parts.append(f"{field}:{normalized_value}")
+        
+        signature_string = '|'.join(signature_parts)
+        return hashlib.sha256(signature_string.encode()).hexdigest()
+    
+    def _calculate_time_diff(self, time1, time2) -> str:
         """Calculate time difference between submissions"""
         try:
             if time1 and time2:
@@ -608,34 +779,108 @@ class DuplicateClaimsDetector:
         except Exception as e:
             logger.error(f"Error calculating time diff: {e}")
             return None
-    
+
     async def _update_claim_duplicate_status(self, encounter_id: str, result: DuplicateDetectionResult):
         """
         Update claim status in database when duplicates are detected
         Sets processed_status to 'flagged' and claim_status to 'processed'
-        Creates structured JSON flag_reason
+        Creates detailed JSON flag_reason with specific duplicate information
         """
         try:
-            # Create structured flag reason based on duplicate types found
-            duplicate_types = [match.duplicate_type.value for match in result.duplicate_matches]
-            highest_confidence = result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
+            # Get the highest confidence match for primary duplicate info
+            highest_match = result.highest_confidence_match
+            
+            # Create detailed duplicate information
+            duplicate_details = []
+            for match in result.duplicate_matches:
+                duplicate_info = {
+                    "duplicate_encounter_id": match.duplicate_encounter_id,
+                    "duplicate_type": match.duplicate_type.value,
+                    "confidence_score": round(match.confidence_score, 3),
+                    "matching_fields": match.matching_fields,
+                    "differing_fields": match.differing_fields,
+                    "detection_timestamp": match.detection_timestamp.isoformat(),
+                    "summary": self._create_duplicate_summary(match)
+                }
+                
+                # Add type-specific details
+                if match.duplicate_type == DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO:
+                    duplicate_info.update({
+                        "issue_description": "Different encounter ID but identical patient and clinical information",
+                        "risk_level": "HIGH" if match.confidence_score >= 0.8 else "MEDIUM",
+                        "provider_comparison": {
+                            "same_provider": match.details.get("provider_original") == match.details.get("provider_duplicate"),
+                            "original_provider": match.details.get("provider_original"),
+                            "duplicate_provider": match.details.get("provider_duplicate")
+                        }
+                    })
+                
+                elif match.duplicate_type == DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO:
+                    duplicate_info.update({
+                        "issue_description": "Same encounter ID contains conflicting information",
+                        "risk_level": "CRITICAL",
+                        "data_integrity_issue": True,
+                        "version_count": match.details.get("total_versions", 2)
+                    })
+                
+                elif match.duplicate_type == DuplicateType.SAME_DAY_VISITS:
+                    duplicate_info.update({
+                        "issue_description": "Multiple encounters for same patient on same date",
+                        "risk_level": "MEDIUM" if match.confidence_score < 0.7 else "HIGH",
+                        "visit_details": {
+                            "same_provider": match.details.get("same_provider", False),
+                            "same_diagnosis": match.details.get("same_diagnosis", False),
+                            "encounter_types": match.details.get("encounter_types", [])
+                        }
+                    })
+                
+                elif match.duplicate_type == DuplicateType.EXACT_DUPLICATE:
+                    duplicate_info.update({
+                        "issue_description": "Exact duplicate claim submission detected",
+                        "risk_level": "CRITICAL",
+                        "fraud_indicator": True,
+                        "submission_time_difference": match.details.get("submission_time_diff")
+                    })
+                
+                duplicate_details.append(duplicate_info)
             
             # Determine primary duplicate issue and severity
-            primary_issue, severity, category = self._categorize_duplicate_issue(duplicate_types, highest_confidence)
+            primary_issue, severity, category = self._categorize_duplicate_issue(
+                [match.duplicate_type.value for match in result.duplicate_matches], 
+                highest_match.confidence_score if highest_match else 0.0
+            )
             
-            # Create structured flag reason
+            # Create enhanced structured flag reason with specific duplicate info
             flag_reason_structure = {
                 "stage": "DUPLICATE_DETECTION",
                 "reason": f"Stage 0 failed: {result.recommendation}",
                 "details": {
                     "category": category,
-                    "recommendation": self._get_duplicate_recommendation(duplicate_types),
-                    "specific_issue": primary_issue,
-                    "action_required": self._get_required_action(duplicate_types),
-                    "duplicate_types_found": duplicate_types,
-                    "total_duplicates": result.total_duplicates_found,
-                    "highest_confidence_score": highest_confidence,
-                    "duplicate_encounters": [match.duplicate_encounter_id for match in result.duplicate_matches]
+                    "primary_issue": primary_issue,
+                    "severity": severity,
+                    "total_duplicates_found": result.total_duplicates_found,
+                    "highest_confidence_score": round(highest_match.confidence_score, 3) if highest_match else 0.0,
+                    
+                    # PRIMARY DUPLICATE INFO (the key info you wanted)
+                    "primary_duplicate_encounter_id": highest_match.duplicate_encounter_id if highest_match else None,
+                    "primary_duplicate_type": highest_match.duplicate_type.value if highest_match else None,
+                    "primary_duplicate_confidence": round(highest_match.confidence_score, 3) if highest_match else 0.0,
+                    "primary_duplicate_summary": self._create_duplicate_summary(highest_match) if highest_match else None,
+                    
+                    # ALL DUPLICATE ENCOUNTER IDs and TYPES
+                    "duplicate_encounter_ids": [match.duplicate_encounter_id for match in result.duplicate_matches],
+                    "duplicate_types": [match.duplicate_type.value for match in result.duplicate_matches],
+                    "duplicate_confidences": [round(match.confidence_score, 3) for match in result.duplicate_matches],
+                    
+                    # DETAILED INFO for each duplicate
+                    "all_duplicates": duplicate_details,
+                    
+                    # SPECIFIC RECOMMENDATION based on duplicate type
+                    "specific_recommendation": self._get_duplicate_recommendation([match.duplicate_type.value for match in result.duplicate_matches]),
+                    "action_required": self._get_required_action([match.duplicate_type.value for match in result.duplicate_matches]),
+                    
+                    # SUMMARY BY TYPE
+                    "duplicate_types_summary": self._create_type_summary(result.duplicate_matches)
                 },
                 "category": "DUPLICATE_VALIDATION",
                 "severity": severity,
@@ -645,7 +890,7 @@ class DuplicateClaimsDetector:
             # Convert to JSON string for storage
             flag_reason_json = json.dumps(flag_reason_structure, default=str)
             
-            # Update the claims_v3 table with structured flag reason
+            # Update the claims_v3 table with enhanced JSON flag reason
             update_query = """
             UPDATE claims_v3 
             SET 
@@ -663,16 +908,109 @@ class DuplicateClaimsDetector:
                 encounter_id,
                 flag_reason_json,
                 result.total_duplicates_found,
-                highest_confidence
+                round(highest_match.confidence_score, 3) if highest_match else 0.0
             )
             
             # Log the duplicate detection for audit trail
             await self._log_duplicate_detection(encounter_id, result, flag_reason_structure)
             
-            logger.info(f"DATABASE UPDATED: {encounter_id} marked as flagged/processed due to {category} ({severity} severity)")
+            logger.info(f"DATABASE UPDATED: {encounter_id} flagged for {category} - Primary duplicate: {highest_match.duplicate_encounter_id if highest_match else 'N/A'} ({highest_match.duplicate_type.value if highest_match else 'N/A'})")
             
         except Exception as e:
             logger.error(f"Error updating claim duplicate status for {encounter_id}: {e}")
+
+    def _create_duplicate_summary(self, match: DuplicateMatch) -> str:
+        """Create a human-readable summary of the duplicate match"""
+        type_descriptions = {
+            DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO: f"Same patient/clinical info as {match.duplicate_encounter_id}",
+            DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO: f"Conflicting data in encounter {match.duplicate_encounter_id}",
+            DuplicateType.SAME_DAY_VISITS: f"Same-day visit with {match.duplicate_encounter_id}",
+            DuplicateType.EXACT_DUPLICATE: f"Exact copy of {match.duplicate_encounter_id}",
+            DuplicateType.PARTIAL_DUPLICATE: f"Partial match with {match.duplicate_encounter_id}"
+        }
+        
+        base_summary = type_descriptions.get(match.duplicate_type, f"Duplicate of {match.duplicate_encounter_id}")
+        confidence_text = f" (Confidence: {match.confidence_score:.1%})"
+        
+        return base_summary + confidence_text
+
+    def _create_type_summary(self, matches: List[DuplicateMatch]) -> Dict[str, Any]:
+        """Create summary by duplicate type"""
+        type_summary = {}
+        
+        for match in matches:
+            type_name = match.duplicate_type.value
+            if type_name not in type_summary:
+                type_summary[type_name] = {
+                    "count": 0,
+                    "highest_confidence": 0.0,
+                    "encounter_ids": [],
+                    "avg_confidence": 0.0
+                }
+            
+            type_summary[type_name]["count"] += 1
+            type_summary[type_name]["encounter_ids"].append(match.duplicate_encounter_id)
+            type_summary[type_name]["highest_confidence"] = max(
+                type_summary[type_name]["highest_confidence"], 
+                match.confidence_score
+            )
+        
+        # Calculate average confidence
+        for type_name, summary in type_summary.items():
+            matching_scores = [m.confidence_score for m in matches if m.duplicate_type.value == type_name]
+            summary["avg_confidence"] = round(sum(matching_scores) / len(matching_scores), 3)
+        
+        return type_summary
+
+    def _get_duplicate_recommendation(self, duplicate_types: List[str]) -> str:
+        """
+        Get specific recommendation based on duplicate types found
+        """
+        recommendations = []
+        
+        if DuplicateType.EXACT_DUPLICATE.value in duplicate_types:
+            recommendations.append("Investigate for potential fraudulent submission")
+        
+        if DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO.value in duplicate_types:
+            recommendations.append("Verify encounter ID assignment and billing processes")
+        
+        if DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO.value in duplicate_types:
+            recommendations.append("Review data entry procedures and system integrity")
+        
+        if DuplicateType.SAME_DAY_VISITS.value in duplicate_types:
+            recommendations.append("Validate medical necessity for multiple same-day encounters")
+        
+        if not recommendations:
+            recommendations.append("Manual review required to determine appropriate action")
+        
+        return "; ".join(recommendations)
+
+    def _get_required_action(self, duplicate_types: List[str]) -> str:
+        """
+        Get required action based on duplicate types
+        """
+        actions = set()  # Use set to avoid duplicate actions
+        
+        if DuplicateType.EXACT_DUPLICATE.value in duplicate_types:
+            actions.add("Flag for fraud investigation")
+            actions.add("Hold payment pending review")
+        
+        if DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO.value in duplicate_types:
+            actions.add("Verify provider billing systems")
+            actions.add("Consolidate duplicate entries")
+        
+        if DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO.value in duplicate_types:
+            actions.add("Audit data entry processes")
+            actions.add("Resolve conflicting information")
+        
+        if DuplicateType.SAME_DAY_VISITS.value in duplicate_types:
+            actions.add("Validate clinical necessity")
+            actions.add("Review provider billing patterns")
+        
+        if not actions:
+            actions.add("Manual case review required")
+        
+        return "; ".join(sorted(actions))
     
     def _categorize_duplicate_issue(self, duplicate_types: List[str], confidence: float) -> Tuple[str, str, str]:
         """
@@ -720,58 +1058,7 @@ class DuplicateClaimsDetector:
                 severity,
                 "Complex Duplicate Case"
             )
-    
-    def _get_duplicate_recommendation(self, duplicate_types: List[str]) -> str:
-        """
-        Get specific recommendation based on duplicate types found
-        """
-        recommendations = []
-        
-        if DuplicateType.EXACT_DUPLICATE.value in duplicate_types:
-            recommendations.append("Investigate for potential fraudulent submission")
-        
-        if DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO.value in duplicate_types:
-            recommendations.append("Verify encounter ID assignment and billing processes")
-        
-        if DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO.value in duplicate_types:
-            recommendations.append("Review data entry procedures and system integrity")
-        
-        if DuplicateType.SAME_DAY_VISITS.value in duplicate_types:
-            recommendations.append("Validate medical necessity for multiple same-day encounters")
-        
-        if not recommendations:
-            recommendations.append("Manual review required to determine appropriate action")
-        
-        return "; ".join(recommendations)
-    
-    def _get_required_action(self, duplicate_types: List[str]) -> str:
-        """
-        Get required action based on duplicate types
-        """
-        actions = set()  # Use set to avoid duplicate actions
-        
-        if DuplicateType.EXACT_DUPLICATE.value in duplicate_types:
-            actions.add("Flag for fraud investigation")
-            actions.add("Hold payment pending review")
-        
-        if DuplicateType.DIFFERENT_ENCOUNTER_SAME_INFO.value in duplicate_types:
-            actions.add("Verify provider billing systems")
-            actions.add("Consolidate duplicate entries")
-        
-        if DuplicateType.SAME_ENCOUNTER_DIFFERENT_INFO.value in duplicate_types:
-            actions.add("Audit data entry processes")
-            actions.add("Resolve conflicting information")
-        
-        if DuplicateType.SAME_DAY_VISITS.value in duplicate_types:
-            actions.add("Validate clinical necessity")
-            actions.add("Review provider billing patterns")
-        
-        if not actions:
-            actions.add("Manual case review required")
-        
-        return "; ".join(sorted(actions))
             
-    
     async def _log_duplicate_detection(self, encounter_id: str, result: DuplicateDetectionResult, flag_reason_structure: Dict = None):
         """
         Log duplicate detection details for audit trail with structured flag reason
@@ -1046,6 +1333,165 @@ class DuplicateClaimsDetector:
                 )
         
         return results
+
+# Main batch processing function for integration with AutomatedBatchProcessor
+async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, Any]:
+    """
+    Core batch duplicate detection stage - flags duplicates with detailed reasons
+    
+    Args:
+        encounter_ids: List of encounter IDs to process
+    
+    Returns:
+        Dict containing batch processing results and database update status
+    """
+    logger.info(f"DUPLICATE DETECTION: Starting for batch with {len(encounter_ids)} claims")
+    
+    # Initialize detector
+    detector = DuplicateClaimsDetector()
+    
+    try:
+        await detector.initialize()
+        
+        # Track results
+        clean_claims = 0
+        flagged_claims = 0
+        blocked_claims = 0
+        error_claims = 0
+        
+        database_updates = {
+            "flagged_claims": [],
+            "blocked_claims": [],
+            "clean_claims": [],
+            "error_claims": []
+        }
+        
+        high_confidence_duplicates = []
+        
+        # Process each claim
+        for encounter_id in encounter_ids:
+            try:
+                # Run duplicate detection
+                result = await detector.detect_all_duplicates(encounter_id)
+                
+                # Process result and update database
+                if result.flag_status == DuplicateFlag.CLEAN:
+                    clean_claims += 1
+                    database_updates["clean_claims"].append(encounter_id)
+                    
+                elif result.flag_status == DuplicateFlag.flagged:
+                    flagged_claims += 1
+                    
+                    database_updates["flagged_claims"].append({
+                        "encounter_id": encounter_id,
+                        "reason": result.recommendation,
+                        "confidence": result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
+                    })
+                    
+                    # Track high confidence duplicates for reporting
+                    if result.highest_confidence_match and result.highest_confidence_match.confidence_score >= 0.8:
+                        high_confidence_duplicates.append({
+                            "primary_encounter": encounter_id,
+                            "duplicate_encounter": result.highest_confidence_match.duplicate_encounter_id,
+                            "type": result.highest_confidence_match.duplicate_type.value,
+                            "confidence": result.highest_confidence_match.confidence_score
+                        })
+                    
+                elif result.flag_status == DuplicateFlag.BLOCKED:
+                    blocked_claims += 1
+                    
+                    database_updates["blocked_claims"].append({
+                        "encounter_id": encounter_id,
+                        "reason": result.recommendation,
+                        "confidence": result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
+                    })
+                    
+                    # Track high confidence duplicates for reporting
+                    if result.highest_confidence_match and result.highest_confidence_match.confidence_score >= 0.8:
+                        high_confidence_duplicates.append({
+                            "primary_encounter": encounter_id,
+                            "duplicate_encounter": result.highest_confidence_match.duplicate_encounter_id,
+                            "type": result.highest_confidence_match.duplicate_type.value,
+                            "confidence": result.highest_confidence_match.confidence_score
+                        })
+                        
+                else:  # SUSPICIOUS or error cases
+                    error_claims += 1
+                    database_updates["error_claims"].append({
+                        "encounter_id": encounter_id,
+                        "reason": result.recommendation,
+                        "error": result.details.get("error") if result.details else "Unknown error"
+                    })
+                
+            except Exception as e:
+                logger.error(f"Error processing duplicate detection for {encounter_id}: {e}")
+                error_claims += 1
+                database_updates["error_claims"].append({
+                    "encounter_id": encounter_id,
+                    "reason": f"Processing error: {str(e)}",
+                    "error": str(e)
+                })
+        
+        # Calculate summary statistics
+        total_claims = len(encounter_ids)
+        duplicate_detection_rate = round(((total_claims - clean_claims) / total_claims * 100), 2) if total_claims > 0 else 0
+        
+        summary_statistics = {
+            "total_claims": total_claims,
+            "clean_claims": clean_claims,
+            "flagged_claims": flagged_claims,
+            "blocked_claims": blocked_claims,
+            "error_claims": error_claims,
+            "duplicate_detection_rate": duplicate_detection_rate
+        }
+        
+        # Generate simple recommendations
+        recommendations = []
+        if blocked_claims > 0:
+            recommendations.append(f"IMMEDIATE ACTION: {blocked_claims} claims blocked for manual review")
+        if flagged_claims > 0:
+            recommendations.append(f"REVIEW REQUIRED: {flagged_claims} claims flagged for duplicate review")
+        if error_claims > 0:
+            recommendations.append(f"ERRORS: {error_claims} claims had processing errors")
+        if clean_claims == total_claims:
+            recommendations.append("CLEAN BATCH: No duplicates detected - proceed with normal processing")
+        
+        logger.info(f"DUPLICATE DETECTION COMPLETED:")
+        logger.info(f"  Total Claims: {total_claims}")
+        logger.info(f"  Clean: {clean_claims}")
+        logger.info(f"  Flagged: {flagged_claims}")
+        logger.info(f"  Blocked: {blocked_claims}")
+        logger.info(f"  Errors: {error_claims}")
+        logger.info(f"  Duplicate Rate: {duplicate_detection_rate}%")
+        
+        return {
+            "summary_statistics": summary_statistics,
+            "database_updates": database_updates,
+            "high_confidence_duplicates": high_confidence_duplicates,
+            "recommendations": recommendations
+        }
+        
+    except Exception as e:
+        logger.error(f"Critical error in batch duplicate detection: {e}")
+        return {
+            "error": str(e),
+            "summary_statistics": {
+                "total_claims": len(encounter_ids),
+                "clean_claims": 0,
+                "flagged_claims": 0,
+                "blocked_claims": 0,
+                "error_claims": len(encounter_ids),
+                "duplicate_detection_rate": 0.0
+            },
+            "database_updates": {
+                "error_claims": [{"encounter_id": eid, "error": str(e)} for eid in encounter_ids]
+            },
+            "recommendations": ["CRITICAL: Batch processing failed - Manual review required for all claims"]
+        }
+        
+    finally:
+        await detector.close()
+
     
     async def get_duplicate_summary_report(self, encounter_ids: List[str]) -> Dict[str, Any]:
         """
@@ -1130,115 +1576,52 @@ def parse_flag_reason(flag_reason_json: str) -> Dict[str, Any]:
     except Exception as e:
         return {"error": f"Failed to parse flag reason: {e}", "raw_data": str(flag_reason_json)}
 
-# Updated flagged claims report with structured flag reason parsing
-async def get_flagged_claims_report() -> Dict[str, Any]:
+# UTILITY FUNCTION to parse and display duplicate info from JSON
+def display_duplicate_info(encounter_id: str, flag_reason_json: str) -> str:
     """
-    Get report of all claims currently flagged for duplicates with parsed structured reasons
+    Parse flag reason JSON and display duplicate information like your example
     """
     try:
-        await initialize_database()
-        queries = await get_nhis_queries()
+        flag_data = json.loads(flag_reason_json)
+        details = flag_data.get('details', {})
         
-        # Get all flagged claims with structured flag reasons
-        flagged_query = """
-        SELECT 
-            encounter_id,
-            provider_name,
-            last_name,
-            other_names,
-            diagnosis_name,
-            gdrg_code,
-            encounter_type,
-            processed_status,
-            claim_status,
-            flag_reason,
-            flagged_at,
-            duplicate_count,
-            highest_duplicate_confidence,
-            submitted_at
-        FROM claims_v3 
-        WHERE processed_status = 'flagged' 
-        ORDER BY flagged_at DESC, highest_duplicate_confidence DESC
-        """
+        # Extract key info
+        status = details.get('severity', 'UNKNOWN')
+        duplicates_found = details.get('total_duplicates_found', 0)
+        recommendation = flag_data.get('reason', 'No recommendation')
         
-        flagged_claims = await queries.db.fetch_all(flagged_query)
+        # Primary duplicate info
+        primary_duplicate_id = details.get('primary_duplicate_encounter_id', 'Unknown')
+        primary_duplicate_type = details.get('primary_duplicate_type', 'Unknown')
+        primary_confidence = details.get('primary_duplicate_confidence', 0.0)
         
-        # Parse structured flag reasons
-        parsed_flagged_claims = []
-        for claim in flagged_claims:
-            claim_dict = dict(claim)
-            if claim_dict.get('flag_reason'):
-                claim_dict['parsed_flag_reason'] = parse_flag_reason(claim_dict['flag_reason'])
-            parsed_flagged_claims.append(claim_dict)
+        # Format output like your example
+        output = []
+        output.append(f"{encounter_id}: Status: {status}")
+        output.append(f"Duplicates Found: {duplicates_found}")
+        output.append(f"Recommendation: {recommendation}")
         
-        # Get duplicate detection log summary with structured data
-        log_query = """
-        SELECT 
-            flag_status,
-            COUNT(*) as count,
-            AVG(highest_confidence) as avg_confidence,
-            MAX(detection_timestamp) as latest_detection,
-            structured_flag_reason->>'severity' as severity,
-            structured_flag_reason->'details'->>'category' as category
-        FROM duplicate_detection_log 
-        WHERE structured_flag_reason IS NOT NULL
-        GROUP BY flag_status, structured_flag_reason->>'severity', structured_flag_reason->'details'->>'category'
-        ORDER BY count DESC
-        """
+        if primary_duplicate_id and primary_duplicate_id != 'Unknown':
+            output.append("Highest Confidence Match:")
+            output.append(f"  Duplicate: {primary_duplicate_id}")
+            output.append(f"  Type: {primary_duplicate_type}")
+            output.append(f"  Confidence: {primary_confidence:.3f}")
         
-        try:
-            log_summary = await queries.db.fetch_all(log_query)
-        except Exception:
-            log_summary = []  # Table might not exist yet
-        
-        # Analyze by severity and category
-        severity_breakdown = {}
-        category_breakdown = {}
-        
-        for claim in parsed_flagged_claims:
-            parsed_flag = claim.get('parsed_flag_reason', {})
-            severity = parsed_flag.get('severity', 'UNKNOWN')
-            category = parsed_flag.get('details', {}).get('category', 'Unknown Category')
-            
-            severity_breakdown[severity] = severity_breakdown.get(severity, 0) + 1
-            category_breakdown[category] = category_breakdown.get(category, 0) + 1
-        
-        report = {
-            "flagged_claims_summary": {
-                "total_flagged_claims": len(flagged_claims),
-                "claims_needing_review": len([c for c in flagged_claims if c.get('processed_status') == 'flagged']),
-                "latest_flagged_date": flagged_claims[0].get('flagged_at') if flagged_claims else None,
-                "severity_breakdown": severity_breakdown,
-                "category_breakdown": category_breakdown
-            },
-            "flagged_claims_details": parsed_flagged_claims,
-            "duplicate_detection_log_summary": [dict(log) for log in log_summary],
-            "generated_at": datetime.now().isoformat()
-        }
-        
-        return report
+        return "\n".join(output)
         
     except Exception as e:
-        logger.error(f"Error generating flagged claims report: {e}")
-        return {
-            "error": str(e),
-            "flagged_claims_summary": {"total_flagged_claims": 0, "error_occurred": True}
-        }
+        return f"{encounter_id}: Error parsing duplicate info - {str(e)}"
 
-# Function to query claims by specific duplicate categories
-async def get_claims_by_duplicate_category(category: str = None, severity: str = None) -> Dict[str, Any]:
+# QUERY FUNCTION to get flagged duplicates with specific info
+async def get_flagged_duplicates_with_details() -> List[Dict[str, Any]]:
     """
-    Get flagged claims filtered by specific duplicate category or severity
-    
-    Args:
-        category: Filter by category (e.g., "Potential Fraud", "Data Integrity Violation")
-        severity: Filter by severity (e.g., "CRITICAL", "HIGH", "MEDIUM", "LOW")
+    Query flagged claims and extract duplicate information from JSON
     """
     try:
         await initialize_database()
         queries = await get_nhis_queries()
         
-        base_query = """
+        query = """
         SELECT 
             encounter_id,
             provider_name,
@@ -1256,290 +1639,156 @@ async def get_claims_by_duplicate_category(category: str = None, severity: str =
         FROM claims_v3 
         WHERE processed_status = 'flagged' 
         AND flag_reason IS NOT NULL
+        AND flag_reason::text LIKE '%DUPLICATE_DETECTION%'
+        ORDER BY flagged_at DESC, highest_duplicate_confidence DESC
+        LIMIT 50
         """
         
-        conditions = []
-        params = []
+        flagged_claims = await queries.db.fetch_all(query)
         
-        if category:
-            conditions.append("flag_reason->'details'->>'category' = $" + str(len(params) + 1))
-            params.append(category)
-        
-        if severity:
-            conditions.append("flag_reason->>'severity' = $" + str(len(params) + 1))
-            params.append(severity)
-        
-        if conditions:
-            base_query += " AND " + " AND ".join(conditions)
-        
-        base_query += " ORDER BY flagged_at DESC, highest_duplicate_confidence DESC"
-        
-        claims = await queries.db.fetch_all(base_query, *params)
-        
-        # Parse flag reasons
-        parsed_claims = []
-        for claim in claims:
+        # Parse and enhance each claim
+        enhanced_claims = []
+        for claim in flagged_claims:
             claim_dict = dict(claim)
-            if claim_dict.get('flag_reason'):
-                claim_dict['parsed_flag_reason'] = parse_flag_reason(claim_dict['flag_reason'])
-            parsed_claims.append(claim_dict)
+            
+            # Parse flag reason JSON
+            try:
+                flag_data = json.loads(claim_dict['flag_reason'])
+                details = flag_data.get('details', {})
+                
+                # Add parsed duplicate info to claim
+                claim_dict.update({
+                    'primary_duplicate_encounter_id': details.get('primary_duplicate_encounter_id'),
+                    'primary_duplicate_type': details.get('primary_duplicate_type'),
+                    'primary_duplicate_confidence': details.get('primary_duplicate_confidence'),
+                    'duplicate_category': details.get('category'),
+                    'severity': details.get('severity'),
+                    'duplicate_encounter_ids': details.get('duplicate_encounter_ids', []),
+                    'specific_recommendation': details.get('specific_recommendation'),
+                    'action_required': details.get('action_required')
+                })
+                
+            except Exception as e:
+                logger.error(f"Error parsing flag reason for {claim_dict['encounter_id']}: {e}")
+                claim_dict['parse_error'] = str(e)
+            
+            enhanced_claims.append(claim_dict)
         
-        return {
-            "filter_criteria": {
-                "category": category,
-                "severity": severity
-            },
-            "total_matching_claims": len(parsed_claims),
-            "matching_claims": parsed_claims,
-            "generated_at": datetime.now().isoformat()
-        }
+        return enhanced_claims
         
     except Exception as e:
-        logger.error(f"Error querying claims by duplicate category: {e}")
-        return {
-            "error": str(e),
-            "filter_criteria": {"category": category, "severity": severity},
-            "total_matching_claims": 0
-        }
+        logger.error(f"Error querying flagged duplicates: {e}")
+        return []
 
-async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, Any]:
+# Main execution functions
+async def main_duplicate_detection():
     """
-    Main function to run duplicate detection and update database statuses
-    Updates processed_status and claim_status for flagged claims in database
+    Main function to run duplicate detection on claims
     """
     detector = DuplicateClaimsDetector()
     
     try:
         await detector.initialize()
         
-        logger.info(f"DUPLICATE DETECTION STAGE: Processing {len(encounter_ids)} claims")
+        # Example usage - replace with actual encounter IDs
+        test_encounter_ids = [
+            "ENC_001",
+            "ENC_002", 
+            "ENC_003"
+        ]
         
-        # Process each claim and update database
-        results = {}
-        database_updates = {
-            "flagged_claims": [],
-            "blocked_claims": [],
-            "clean_claims": [],
-            "update_errors": []
-        }
+        # Run batch duplicate detection
+        results = await detector.batch_detect_duplicates(test_encounter_ids)
         
-        for encounter_id in encounter_ids:
-            try:
-                # Detect duplicates for this claim
-                result = await detector.detect_all_duplicates(encounter_id)
-                results[encounter_id] = result
-                
-                # Track database updates
-                if result.flag_status == DuplicateFlag.flagged:
-                    database_updates["flagged_claims"].append({
-                        "encounter_id": encounter_id,
-                        "reason": result.recommendation,
-                        "duplicate_count": result.total_duplicates_found,
-                        "confidence": result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
-                    })
-                elif result.flag_status == DuplicateFlag.BLOCKED:
-                    database_updates["blocked_claims"].append({
-                        "encounter_id": encounter_id,
-                        "reason": result.recommendation,
-                        "duplicate_count": result.total_duplicates_found,
-                        "confidence": result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
-                    })
-                else:
-                    database_updates["clean_claims"].append(encounter_id)
-                
-                # Log result
-                status_indicator = {
-                    DuplicateFlag.CLEAN: "CLEAN",
-                    DuplicateFlag.SUSPICIOUS: "SUSPICIOUS", 
-                    DuplicateFlag.flagged: "flagged (DB UPDATED)",
-                    DuplicateFlag.BLOCKED: "BLOCKED (DB UPDATED)"
-                }
-                
-                status = status_indicator.get(result.flag_status, "UNKNOWN")
-                logger.info(f"{encounter_id}: {status} ({result.total_duplicates_found} duplicates)")
-                
-            except Exception as e:
-                logger.error(f"Error processing {encounter_id}: {e}")
-                database_updates["update_errors"].append({
-                    "encounter_id": encounter_id,
-                    "error": str(e)
-                })
-                
-                # Create error result
-                results[encounter_id] = DuplicateDetectionResult(
-                    encounter_id=encounter_id,
-                    flag_status=DuplicateFlag.SUSPICIOUS,
-                    duplicate_matches=[],
-                    total_duplicates_found=0,
-                    highest_confidence_match=None,
-                    recommendation=f"MANUAL REVIEW: Error during processing - {str(e)}",
-                    details={"error": str(e)}
-                )
+        # Generate summary report
+        report = await detector.get_duplicate_summary_report(test_encounter_ids)
         
-        # Generate comprehensive summary
-        total_flagged = len(database_updates["flagged_claims"])
-        total_blocked = len(database_updates["blocked_claims"])
-        total_clean = len(database_updates["clean_claims"])
-        total_errors = len(database_updates["update_errors"])
+        print("=== DUPLICATE DETECTION SUMMARY ===")
+        print(f"Total Claims Analyzed: {report['summary_statistics']['total_claims_analyzed']}")
+        print(f"Clean Claims: {report['summary_statistics']['clean_claims']}")
+        print(f"Flagged Claims: {report['summary_statistics']['flagged_claims']}")
+        print(f"Blocked Claims: {report['summary_statistics']['blocked_claims']}")
+        print(f"Duplicate Detection Rate: {report['summary_statistics']['duplicate_detection_rate']}%")
         
-        # Count duplicate types across all results
-        duplicate_type_stats = {}
-        high_confidence_duplicates = []
+        print("\n=== INDIVIDUAL RESULTS ===")
+        for encounter_id, result in results.items():
+            print(f"\n{encounter_id}: {result.flag_status.value}")
+            if result.duplicate_matches:
+                print(f"  Duplicates Found: {result.total_duplicates_found}")
+                print(f"  Highest Confidence: {result.highest_confidence_match.confidence_score:.3f}")
+                print(f"  Recommendation: {result.recommendation}")
         
-        for result in results.values():
-            for match in result.duplicate_matches:
-                type_name = match.duplicate_type.value
-                duplicate_type_stats[type_name] = duplicate_type_stats.get(type_name, 0) + 1
-                
-                if match.confidence_score >= 0.8:
-                    high_confidence_duplicates.append({
-                        "primary_encounter": match.primary_encounter_id,
-                        "duplicate_encounter": match.duplicate_encounter_id,
-                        "type": type_name,
-                        "confidence": match.confidence_score
-                    })
-        
-        # Generate recommendations
-        recommendations = []
-        if total_blocked > 0:
-            recommendations.append(f"DATABASE UPDATED: {total_blocked} claims marked as BLOCKED/processed")
-        if total_flagged > 0:
-            recommendations.append(f"DATABASE UPDATED: {total_flagged} claims marked as flagged/processed")
-        if total_clean > 0:
-            recommendations.append(f"READY FOR VALIDATION: {total_clean} clean claims can proceed")
-        if total_errors > 0:
-            recommendations.append(f"MANUAL REVIEW: {total_errors} claims had processing errors")
-        
-        # Calculate rates
-        total_processed = len(encounter_ids)
-        duplicate_rate = round(((total_flagged + total_blocked) / total_processed * 100), 2) if total_processed > 0 else 0
-        
-        report = {
-            "summary_statistics": {
-                "total_claims_processed": total_processed,
-                "clean_claims": total_clean,
-                "flagged_claims": total_flagged,
-                "blocked_claims": total_blocked,
-                "error_claims": total_errors,
-                "duplicate_detection_rate": duplicate_rate,
-                "database_updates_completed": total_flagged + total_blocked
-            },
-            "database_updates": database_updates,
-            "duplicate_type_breakdown": duplicate_type_stats,
-            "high_confidence_duplicates": high_confidence_duplicates,
-            "recommendations": recommendations,
-            "detailed_results": results,
-            "processing_metadata": {
-                "detection_timestamp": datetime.now().isoformat(),
-                "schema_updates_applied": True,
-                "audit_logging_enabled": True,
-                "confidence_thresholds": detector.confidence_thresholds
-            }
-        }
-        
-        logger.info(f"DUPLICATE DETECTION STAGE COMPLETED: {total_flagged} flagged, {total_blocked} blocked, {total_clean} clean, {total_errors} errors")
-        
-        return report
+        return results, report
         
     except Exception as e:
-        logger.error(f"Error in duplicate detection stage: {e}")
-        return {
-            "error": str(e),
-            "summary_statistics": {
-                "total_claims_processed": len(encounter_ids),
-                "error_occurred": True
-            },
-            "recommendations": [f"SYSTEM ERROR: Duplicate detection failed - {str(e)}"]
-        }
+        logger.error(f"Error in main duplicate detection: {e}")
+        return None, None
     
     finally:
         await detector.close()
 
-# Example usage and testing
-async def main():
-    """
-    Test the duplicate detection system
-    """
-    try:
-        # Test encounter IDs (replace with actual IDs from your database)
-        test_encounter_ids = [
-            "LIN-0992-RKLN",
-            "LIN-4881-BEEU", 
-            "LIN-1234-TEST",
-            "LIN-5678-DEMO"
-        ]
-        
-        print("DUPLICATE DETECTION SYSTEM - TESTING")
-        print("=" * 60)
-        print("DETECTION CAPABILITIES:")
-        print("  1. Different encounter IDs, same information")
-        print("  2. Same encounter ID, different information") 
-        print("  3. Same patient, same day visits")
-        print("  4. Exact duplicates")
-        print("=" * 60)
-        
-        # Run complete duplicate detection stage
-        report = await run_duplicate_detection_stage(test_encounter_ids)
-        
-        if "error" in report:
-            print(f"ERROR: {report['error']}")
-            return
-        
-        # Display summary results
-        stats = report["summary_statistics"]
-        print(f"\nSUMMARY RESULTS:")
-        print(f"  Total Claims Analyzed: {stats['total_claims_processed']}")
-        print(f"  Clean Claims: {stats['clean_claims']}")
-        print(f"  flagged Claims: {stats['flagged_claims']}")
-        print(f"  Blocked Claims: {stats['blocked_claims']}")
-        print(f"  Error Claims: {stats['error_claims']}")
-        print(f"  Duplicate Detection Rate: {stats['duplicate_detection_rate']}%")
-        
-        # Display duplicate type breakdown
-        if report["duplicate_type_breakdown"]:
-            print(f"\nDUPLICATE TYPES DETECTED:")
-            for dup_type, count in report["duplicate_type_breakdown"].items():
-                print(f"  {dup_type}: {count} cases")
-        
-        # Display high confidence duplicates
-        if report["high_confidence_duplicates"]:
-            print(f"\nHIGH CONFIDENCE DUPLICATES:")
-            for dup in report["high_confidence_duplicates"][:5]:  # Show first 5
-                print(f"  {dup['primary_encounter']} <-> {dup['duplicate_encounter']}")
-                print(f"    Type: {dup['type']}, Confidence: {dup['confidence']:.2f}")
-        
-        # Display recommendations
-        if report["recommendations"]:
-            print(f"\nRECOMMENDATIONS:")
-            for rec in report["recommendations"]:
-                print(f"  - {rec}")
-        
-        # Show detailed results for first few claims
-        print(f"\nDETAILED RESULTS (First 3 claims):")
-        detailed = report["detailed_results"]
-        for i, (encounter_id, result) in enumerate(list(detailed.items())[:3]):
-            print(f"\n  [{i+1}] {encounter_id}:")
-            print(f"      Status: {result.flag_status.value}")
-            print(f"      Duplicates Found: {result.total_duplicates_found}")
-            print(f"      Recommendation: {result.recommendation}")
-            
-            if result.highest_confidence_match:
-                hcm = result.highest_confidence_match
-                print(f"      Highest Confidence Match:")
-                print(f"        Duplicate: {hcm.duplicate_encounter_id}")
-                print(f"        Type: {hcm.duplicate_type.value}")
-                print(f"        Confidence: {hcm.confidence_score:.3f}")
-        
-        print(f"\nTESTING COMPLETED!")
-        print("=" * 60)
-        print("INTEGRATION READY:")
-        print("  - Run this stage before InitialProcessingValidator")
-        print("  - Use database updates to filter claims")
-        print("  - Handle flagged/blocked claims separately")
-        print("  - Log all duplicate matches for audit trail")
-        
-    except Exception as e:
-        print(f"TEST FAILED: {e}")
-
+# Usage example
 if __name__ == "__main__":
-    asyncio.run(main())
+    # Run the duplicate detection
+    results, report = asyncio.run(main_duplicate_detection())
+    
+    if results:
+        print("\n=== DUPLICATE DETECTION COMPLETED SUCCESSFULLY ===")
+    else:
+        print("\n=== DUPLICATE DETECTION FAILED ===")
+
+# Additional utility functions for specific use cases
+
+async def check_single_claim_duplicates(encounter_id: str) -> DuplicateDetectionResult:
+    """
+    Check duplicates for a single claim
+    """
+    detector = DuplicateClaimsDetector()
+    
+    try:
+        await detector.initialize()
+        result = await detector.detect_all_duplicates(encounter_id)
+        return result
+    
+    finally:
+        await detector.close()
+
+async def get_all_flagged_duplicates():
+    """
+    Get all flagged duplicate claims with parsed details
+    """
+    enhanced_claims = await get_flagged_duplicates_with_details()
+    
+    print(f"\n=== FLAGGED DUPLICATE CLAIMS ({len(enhanced_claims)}) ===")
+    
+    for claim in enhanced_claims:
+        print(f"\nEncounter: {claim['encounter_id']}")
+        print(f"Provider: {claim['provider_name']}")
+        print(f"Patient: {claim['last_name']}, {claim['other_names']}")
+        print(f"Diagnosis: {claim['diagnosis_name']}")
+        print(f"Severity: {claim.get('severity', 'Unknown')}")
+        print(f"Primary Duplicate: {claim.get('primary_duplicate_encounter_id', 'None')}")
+        print(f"Duplicate Type: {claim.get('primary_duplicate_type', 'None')}")
+        print(f"Confidence: {claim.get('primary_duplicate_confidence', 0.0):.3f}")
+        print(f"Action Required: {claim.get('action_required', 'Manual Review')}")
+        print("-" * 50)
+    
+    return enhanced_claims
+
+# Quick test function for development
+async def quick_test():
+    """
+    Quick test of duplicate detection functionality
+    """
+    print("Starting Quick Duplicate Detection Test...")
+    
+    # Test single claim
+    test_encounter = "TEST_ENC_001"
+    result = await check_single_claim_duplicates(test_encounter)
+    
+    print(f"\nTest Result for {test_encounter}:")
+    print(f"Status: {result.flag_status.value}")
+    print(f"Duplicates Found: {result.total_duplicates_found}")
+    print(f"Recommendation: {result.recommendation}")
+    
+    return result

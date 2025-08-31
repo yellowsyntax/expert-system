@@ -1443,7 +1443,7 @@ async def test_enhanced_validations():
                     else:
                         print(f"    {key}: {value}")
         
-        # Test bulk duplicate analysis
+        
         print(f"\n2️⃣ Running bulk duplicate analysis...")
         bulk_results = await enhanced.bulk_duplicate_analysis(days_back=7)
         
