@@ -494,10 +494,7 @@ class IntegratedNHISOrchestrator:
     # UPDATED MASTER PIPELINE with Enhanced Validations as Stage 2
     
     async def process_complete_claim_with_db_update(self, encounter_id: str) -> ProcessingOutcome:
-        """
-        UPDATED INTEGRATED MASTER PIPELINE: Process claim + enhanced validations + automatic database update
-        Pipeline: Initial → Enhanced Validations → Encounter Flow → Credentialing → G-DRG → Medicine → Final → Database
-        """
+        
         if not self.is_initialized:
             await self.initialize()
         
@@ -745,8 +742,8 @@ class IntegratedNHISOrchestrator:
 
             if pipeline_results.get("flagged_at_stage"):
                 processing_outcome.overall_result = ValidationResult.FLAGGED
-                flag_details = f"Medical coherence issues detected in {pipeline_results['flagged_at_stage']}"
-                processing_outcome.reason = f"FLAGGED: {flag_details} - Manual review required"
+               
+                processing_outcome.reason = f"FLAGGED:  - Manual review required"
 
             if processing_outcome.details is None:
                 processing_outcome.details = {}
@@ -758,7 +755,7 @@ class IntegratedNHISOrchestrator:
                 "requires_manual_review": True
             })
 
-            logger.warning(f"🚩 PRESERVING FLAGGED STATUS for {encounter_id}: {flag_details}")
+            logger.warning(f"🚩 PRESERVING FLAGGED STATUS for {encounter_id}")
             
             # UPDATED: Handle FLAGGED claims in database update
             if processing_outcome.overall_result == ValidationResult.FLAGGED:

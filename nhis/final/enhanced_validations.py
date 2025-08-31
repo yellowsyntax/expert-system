@@ -108,7 +108,7 @@ class EnhancedValidations:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info("✅ Enhanced Validations initialized")
+            logger.info(" Enhanced Validations initialized")
     
     async def close(self):
         """Close database connections"""
@@ -201,7 +201,7 @@ class EnhancedValidations:
             else:
                 los_days = (datetime.now() - admission_date).days
             
-            logger.info(f"✅ Medicine dispensing period validation passed for {encounter_id}")
+            logger.info(f" Medicine dispensing period validation passed for {encounter_id}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -314,12 +314,12 @@ class EnhancedValidations:
                 diagnosis_name,
                 provider_name,
                 claim_status,
-                ABS(EXTRACT(EPOCH FROM ($2::date - DATE(admission_date)))/86400) as days_apart
+                ABS(($2::date - admission_date::date)) as days_apart
             FROM claims_v3 
             WHERE nhis_number = $1 
                 AND encounter_id != $3
-                AND ABS(EXTRACT(EPOCH FROM ($2::date - DATE(admission_date)))/86400) < 7
-                AND ABS(EXTRACT(EPOCH FROM ($2::date - DATE(admission_date)))/86400) > 0
+                AND ABS(($2::date - admission_date::date)) < 7
+                AND ABS(($2::date - admission_date::date)) > 0
             ORDER BY admission_date DESC
             """
             
@@ -424,7 +424,7 @@ class EnhancedValidations:
                     }
                 )
             
-            logger.info(f"✅ No duplicate claims found for patient {nhis_number} on {admission_date_only}")
+            logger.info(f" No duplicate claims found for patient {nhis_number} on {admission_date_only}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -838,7 +838,7 @@ System: NHIS Enhanced Duplicate Validator
                     }
                 )
             
-            logger.info(f"✅ Polypharmacy validation passed for {len(medicines)} medicines")
+            logger.info(f" Polypharmacy validation passed for {len(medicines)} medicines")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -966,7 +966,7 @@ System: NHIS Enhanced Duplicate Validator
                         }
                     )
             
-            logger.info(f"✅ Gender-diagnosis validation passed for {encounter_id}")
+            logger.info(f" Gender-diagnosis validation passed for {encounter_id}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -1116,7 +1116,7 @@ System: NHIS Enhanced Duplicate Validator
                     }
                 )
             
-            logger.info(f"✅ Supporting documents validation passed for {encounter_id}")
+            logger.info(f" Supporting documents validation passed for {encounter_id}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -1210,7 +1210,7 @@ System: NHIS Enhanced Duplicate Validator
                 }
             )
             
-            logger.info(f"✅ Enhanced validations completed for {encounter_id}: {approved}/{total_checks} passed")
+            logger.info(f" Enhanced validations completed for {encounter_id}: {approved}/{total_checks} passed")
             return results
             
         except Exception as e:
@@ -1237,7 +1237,7 @@ System: NHIS Enhanced Duplicate Validator
                 # Log summary for each claim
                 if "summary" in claim_results:
                     summary = claim_results["summary"]
-                    status_emoji = "✅" if summary.result == ValidationResult.APPROVED else "⚠️" if summary.result == ValidationResult.FLAGGED else "❌"
+                    status_emoji = "" if summary.result == ValidationResult.APPROVED else "⚠️" if summary.result == ValidationResult.FLAGGED else "❌"
                     logger.info(f"{status_emoji} {encounter_id}: {summary.reason}")
                 
             except Exception as e:
@@ -1472,10 +1472,10 @@ async def test_enhanced_validations():
         # Generate sample report
         print(f"\n5️⃣ Generating sample duplicate report...")
         report = await enhanced.generate_duplicate_violations_report(days_back=7)
-        print("   Report generated successfully ✅")
+        print("   Report generated successfully ")
         print(f"   Report length: {len(report)} characters")
         
-        print(f"\n✅ ENHANCED VALIDATIONS WITH DUPLICATES TEST COMPLETED")
+        print(f"\n ENHANCED VALIDATIONS WITH DUPLICATES TEST COMPLETED")
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
@@ -1558,7 +1558,7 @@ async def test_duplicate_detection_only():
         print(f"\n📝 REPORT EXCERPT:")
         print(report[:1000] + "..." if len(report) > 1000 else report)
         
-        print(f"\n✅ DUPLICATE DETECTION TEST COMPLETED")
+        print(f"\n DUPLICATE DETECTION TEST COMPLETED")
         print(f"   Full report length: {len(report):,} characters")
         
     except Exception as e:
@@ -1596,7 +1596,7 @@ async def cli_duplicate_scan(days: int = 7):
             print(f"   {summary['same_day_violations']['high_severity_count']} high severity cases need immediate attention")
             print(f"   Total amount involved: GH₵{summary['same_day_violations']['total_amount_involved']:,.2f}")
         else:
-            print(f"\n✅ No duplicate violations found!")
+            print(f"\n No duplicate violations found!")
             
     finally:
         await validator.close()
