@@ -168,10 +168,10 @@ class IntegratedNHISOrchestrator:
         """Display interactive processing menu"""
         print(f"\n🎯 NHIS EXPERT SYSTEM - INTERACTIVE CLAIMS PROCESSING")
         print("=" * 80)
-        print(f"🚀 Expert System Status: {'✅ READY' if self.is_initialized else '❌ NOT INITIALIZED'}")
-        print(f"💾 Database Integration: ✅ ACTIVE")
-        print(f"🔧 Automatic Database Updates: ✅ ENABLED")
-        print(f"🔍 Enhanced Validations: ✅ INTEGRATED")
+        print(f"🚀 Expert System Status: {' READY' if self.is_initialized else '❌ NOT INITIALIZED'}")
+        print(f"💾 Database Integration:  ACTIVE")
+        print(f"🔧 Automatic Database Updates:  ENABLED")
+        print(f"🔍 Enhanced Validations:  INTEGRATED")
         
         # Get available claims count
         available_claims = await self.get_available_claims()
@@ -179,7 +179,7 @@ class IntegratedNHISOrchestrator:
         
         print(f"\n📊 DATABASE STATUS:")
         print(f"  Total Claims Available: {total_claims}")
-        print(f"  Ready for Processing: ✅")
+        print(f"  Ready for Processing: ")
         
         print(f"\n📋 PROCESSING OPTIONS:")
         print(f"  1️⃣  Process Single Claim (Enter Encounter ID)")
@@ -362,7 +362,7 @@ class IntegratedNHISOrchestrator:
         print(f"🎯 Overall Result: {result.overall_result.value}")
         print(f"📍 Final Stage: {result.processing_stage.value}")
         print(f"⏱️  Processing Time: {result.processing_time_seconds}s")
-        print(f"💾 Database Updated: {'✅ YES' if result.database_updated else '❌ NO'}")
+        print(f"💾 Database Updated: {' YES' if result.database_updated else '❌ NO'}")
         print(f"📝 Reason: {result.reason}")
         
         if result.details:
@@ -380,20 +380,20 @@ class IntegratedNHISOrchestrator:
                 print(f"\n🔍 ENHANCED VALIDATIONS:")
                 for validation_type, validation_result in enhanced_results.items():
                     if validation_type != 'summary':
-                        status_emoji = "✅" if validation_result.result.value == "APPROVED" else "⚠️" if validation_result.result.value == "FLAGGED" else "❌"
+                        status_emoji = "" if validation_result.result.value == "APPROVED" else "⚠️" if validation_result.result.value == "FLAGGED" else "❌"
                         print(f"  {status_emoji} {validation_type.replace('_', ' ').title()}: {validation_result.result.value}")
             
             # Financial information
             if result.details.get('amounts'):
                 amounts = result.details['amounts']
-                print(f"\n💰 FINANCIAL SUMMARY:")
+                print(f"\n FINANCIAL SUMMARY:")
                 print(f"  Total Claimed: {amounts.get('total_claimed', 0)} GHS")
                 print(f"  Approved: {amounts.get('approved', 0)} GHS")
                 print(f"  Partial: {amounts.get('partial', 0)} GHS")
                 print(f"  Denied: {amounts.get('denied', 0)} GHS")
                 
                 if amounts.get('gdrg_tariff') or amounts.get('medicine_cost'):
-                    print(f"\n💰 BREAKDOWN:")
+                    print(f"\n BREAKDOWN:")
                     print(f"  G-DRG Tariff: {amounts.get('gdrg_tariff', 0)} GHS")
                     print(f"  Medicine Cost: {amounts.get('medicine_cost', 0)} GHS")
             
@@ -401,7 +401,7 @@ class IntegratedNHISOrchestrator:
             if result.details.get('final_decision'):
                 print(f"\n🎯 FINAL DECISION: {result.details['final_decision']}")
         
-        print(f"\n✅ PROCESSING COMPLETE")
+        print(f"\n PROCESSING COMPLETE")
         input(f"\nPress Enter to continue...")
     
     async def display_batch_summary(self, summary: Dict[str, Any]):
@@ -413,7 +413,7 @@ class IntegratedNHISOrchestrator:
         batch_overview = summary['batch_overview']
         print(f"\n📈 PROCESSING RESULTS:")
         print(f"  Total Claims: {batch_overview['total_claims']}")
-        print(f"  ✅ Approved: {batch_overview['approved']}")
+        print(f"   Approved: {batch_overview['approved']}")
         print(f"  ❌ Rejected: {batch_overview['rejected']}")
         print(f"  📄 Partial: {batch_overview['partial']}")
         print(f"  ⏳ Pending: {batch_overview['pending']}")
@@ -426,7 +426,7 @@ class IntegratedNHISOrchestrator:
             enhanced_summary = summary['enhanced_validations_summary']
             print(f"\n🔍 ENHANCED VALIDATIONS SUMMARY:")
             print(f"  Total Enhanced Checks: {enhanced_summary['total_enhanced_checks']}")
-            print(f"  ✅ Passed: {enhanced_summary['enhanced_passed']}")
+            print(f"   Passed: {enhanced_summary['enhanced_passed']}")
             print(f"  ❌ Failed: {enhanced_summary['enhanced_failed']}")
             print(f"  ⚠️ Flagged: {enhanced_summary['enhanced_flagged']}")
             print(f"  📊 Enhanced Success Rate: {enhanced_summary['enhanced_success_rate']}%")
@@ -435,14 +435,14 @@ class IntegratedNHISOrchestrator:
         db_integration = summary['database_integration']
         print(f"\n💾 DATABASE INTEGRATION:")
         print(f"  DB Updates Attempted: {db_integration['total_db_updates_attempted']}")
-        print(f"  ✅ Successful: {db_integration['db_updates_successful']}")
+        print(f"   Successful: {db_integration['db_updates_successful']}")
         print(f"  ❌ Failed: {db_integration['db_updates_failed']}")
         print(f"  📊 Success Rate: {db_integration['db_update_success_rate']}%")
         print(f"  🔧 Integration Status: {db_integration['integration_status']}")
         
         # Financial summary
         financial = summary['financial_summary']
-        print(f"\n💰 FINANCIAL SUMMARY:")
+        print(f"\n FINANCIAL SUMMARY:")
         print(f"  Total Approved: {financial['total_approved_amount']} {financial['currency']}")
         print(f"  G-DRG Amount: {financial['total_gdrg_amount']} {financial['currency']}")
         print(f"  Medicine Amount: {financial['total_medicine_amount']} {financial['currency']}")
@@ -461,7 +461,7 @@ class IntegratedNHISOrchestrator:
         if show_details in ['y', 'yes']:
             await self.display_detailed_results(summary['detailed_results'])
         
-        print(f"\n✅ BATCH PROCESSING COMPLETE")
+        print(f"\n BATCH PROCESSING COMPLETE")
         input(f"\nPress Enter to continue...")
     
     async def display_detailed_results(self, detailed_results: Dict[str, ProcessingOutcome]):
@@ -473,14 +473,14 @@ class IntegratedNHISOrchestrator:
             print(f"\n  📄 {i}. {encounter_id}:")
             print(f"    🎯 Result: {result.overall_result.value}")
             print(f"    ⏱️  Time: {result.processing_time_seconds}s")
-            print(f"    💾 DB Updated: {'✅' if result.database_updated else '❌'}")
+            print(f"    💾 DB Updated: {'' if result.database_updated else '❌'}")
             print(f"    📝 Reason: {result.reason}")
             
             if result.details:
                 if result.details.get('amounts'):
                     amounts = result.details['amounts']
                     approved = amounts.get('approved', 0)
-                    print(f"    💰 Amount: {approved} GHS")
+                    print(f"     Amount: {approved} GHS")
                 
                 if result.details.get('final_decision'):
                     print(f"    🎯 Decision: {result.details['final_decision']}")
@@ -540,7 +540,7 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 1 FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 1 PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 1 PASSED for {encounter_id}: {stage_result.reason}")
             
             # Extract routing information
             encounter_type = stage_result.details.get('encounter_type')
@@ -561,7 +561,7 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 2 ENHANCED VALIDATIONS FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 2 ENHANCED VALIDATIONS PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 2 ENHANCED VALIDATIONS PASSED for {encounter_id}: {stage_result.reason}")
             
             # STAGE 3: ENCOUNTER-SPECIFIC FLOW (formerly Stage 2)
             logger.info(f"🏥 STAGE 3: Starting {encounter_type} Flow for {encounter_id}")
@@ -572,7 +572,7 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 3 FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 3 PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 3 PASSED for {encounter_id}: {stage_result.reason}")
             
             # STAGE 4: CREDENTIALING & LEVEL CHECK (formerly Stage 3)
             logger.info(f"🏛️ STAGE 4: Starting Credentialing Check for {encounter_id}")
@@ -583,7 +583,7 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 4 FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 4 PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 4 PASSED for {encounter_id}: {stage_result.reason}")
             
             # STAGE 5: G-DRG DETERMINATION (formerly Stage 4)
             logger.info(f"🎯 STAGE 5: Starting G-DRG Determination for {encounter_id}")
@@ -594,16 +594,16 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 5 FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 5 PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 5 PASSED for {encounter_id}: {stage_result.reason}")
             
             # Extract G-DRG tariff from Stage 5 results
             if stage_result.details:
                 if stage_result.details.get('stage5_details'):
                     stage5_details = stage_result.details['stage5_details']
-                    logger.info(f"💰 NESTED STRUCTURE: Using stage5_details from nested structure")
+                    logger.info(f" NESTED STRUCTURE: Using stage5_details from nested structure")
                 else:
                     stage5_details = stage_result.details
-                    logger.info(f"💰 FLAT STRUCTURE: Using details directly")
+                    logger.info(f" FLAT STRUCTURE: Using details directly")
 
                 selected_tariff = 0.0
                 selected_gdrg = None
@@ -611,19 +611,19 @@ class IntegratedNHISOrchestrator:
                 if stage5_details.get('selected_tariff'):
                     selected_tariff = float(stage5_details['selected_tariff'])
                     selected_gdrg = stage5_details.get('selected_gdrg')
-                    logger.info(f"💰 DIRECT ACCESS: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+                    logger.info(f" DIRECT ACCESS: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
 
                 if selected_tariff == 0.0 and stage5_details.get('evaluation_summary'):
                     eval_summary = stage5_details['evaluation_summary']
                     selected_tariff = float(eval_summary.get('winning_tariff', 0.0))
                     selected_gdrg = eval_summary.get('winner')
-                    logger.info(f"💰 EVAL SUMMARY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+                    logger.info(f" EVAL SUMMARY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
 
                 if selected_tariff == 0.0 and stage5_details.get('gdrg_summary'):
                     gdrg_summary = stage5_details['gdrg_summary']
                     selected_tariff = float(gdrg_summary.get('tariff_amount', 0.0))
                     selected_gdrg = gdrg_summary.get('selected_gdrg')
-                    logger.info(f"💰 LEGACY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
+                    logger.info(f" LEGACY: Found tariff = {selected_tariff}, G-DRG = {selected_gdrg}")
 
                 if selected_tariff > 0:
                     pipeline_results["financial_components"]["gdrg_tariff"] = selected_tariff
@@ -632,9 +632,9 @@ class IntegratedNHISOrchestrator:
                         'selected_tariff': selected_tariff,
                         'selected_tariff_info': {'amount': selected_tariff, 'currency': 'GHS'}
                     }
-                    logger.info(f"💰 FIXED: Captured G-DRG {selected_gdrg} = {selected_tariff} GHS from Stage 5")
+                    logger.info(f" FIXED: Captured G-DRG {selected_gdrg} = {selected_tariff} GHS from Stage 5")
                 else:
-                    logger.error(f"💰 FAILED: Could not extract tariff from Stage 5")
+                    logger.error(f" FAILED: Could not extract tariff from Stage 5")
                     logger.error(f"Available keys: {list(stage5_details.keys()) if stage5_details else 'None'}")
                     if stage5_details:
                         logger.error(f"selected_tariff value: {stage5_details.get('selected_tariff')}")
@@ -642,8 +642,8 @@ class IntegratedNHISOrchestrator:
                             
 
             
-            # STAGE 6: MEDICINE VALIDATION (formerly Stage 5)
-            logger.info(f"💊 STAGE 6: Starting Medicine Validation for {encounter_id}")
+            
+            logger.info(f" STAGE 6: Starting Medicine Validation for {encounter_id}")
             
             stage_result = await self._stage6_medicine_validation(encounter_id, pipeline_results)
             
@@ -651,7 +651,7 @@ class IntegratedNHISOrchestrator:
                 logger.error(f"❌ STAGE 6 FAILED for {encounter_id}: {stage_result.reason}")
                 return await self._finalize_with_database_update(encounter_id, stage_result, pipeline_results, start_time)
             
-            logger.info(f"✅ STAGE 6 PASSED for {encounter_id}: {stage_result.reason}")
+            logger.info(f" STAGE 6 PASSED for {encounter_id}: {stage_result.reason}")
             
             # Extract medicine cost from Stage 6 results
             if stage_result.details and stage_result.details.get('stage6_details'):
@@ -794,7 +794,7 @@ class IntegratedNHISOrchestrator:
                 if processing_outcome.overall_result == ValidationResult.FLAGGED:
                     logger.warning(f"🚩 FLAGGED CLAIM UPDATED: {encounter_id} - Database marked for manual review")
                 else:
-                    logger.info(f"✅ DATABASE UPDATED for {encounter_id}: Expert system results persisted")
+                    logger.info(f" DATABASE UPDATED for {encounter_id}: Expert system results persisted")
             else:
                 pipeline_results["stages_failed"].append({
                     "stage": "database_update",
@@ -814,9 +814,9 @@ class IntegratedNHISOrchestrator:
             
             # Special logging for flagged claims
             if processing_outcome.overall_result == ValidationResult.FLAGGED:
-                logger.warning(f"🚩 FLAGGED PIPELINE COMPLETED for {encounter_id}: MANUAL REVIEW REQUIRED (DB: {'✅' if db_update_success else '❌'}) in {total_time:.3f}s")
+                logger.warning(f"🚩 FLAGGED PIPELINE COMPLETED for {encounter_id}: MANUAL REVIEW REQUIRED (DB: {'' if db_update_success else '❌'}) in {total_time:.3f}s")
             else:
-                logger.info(f"🎯 INTEGRATED PIPELINE COMPLETED for {encounter_id}: {processing_outcome.overall_result.value} (DB: {'✅' if db_update_success else '❌'}) in {total_time:.3f}s")
+                logger.info(f"🎯 INTEGRATED PIPELINE COMPLETED for {encounter_id}: {processing_outcome.overall_result.value} (DB: {'' if db_update_success else '❌'}) in {total_time:.3f}s")
             
             return processing_outcome
             
@@ -1412,7 +1412,7 @@ class IntegratedNHISOrchestrator:
                 pipeline_results["amounts"] = result.details['amounts']
                 
                 amounts = result.details['amounts']
-                logger.info(f"💰 FINAL AMOUNTS CALCULATED:")
+                logger.info(f" FINAL AMOUNTS CALCULATED:")
                 logger.info(f"   G-DRG Tariff: {amounts.get('gdrg_tariff', 0)} GHS")
                 logger.info(f"   Medicine Cost: {amounts.get('medicine_cost', 0)} GHS")
                 logger.info(f"   Total Approved: {amounts.get('approved', 0)} GHS")
@@ -1468,7 +1468,7 @@ class IntegratedNHISOrchestrator:
                 
                 # Enhanced logging with database update status
                 status_emoji = self._get_status_emoji(result.overall_result)
-                db_emoji = "💾✅" if result.database_updated else "💾❌"
+                db_emoji = "💾" if result.database_updated else "💾❌"
                 
                 actual_amount = 0.0
                 if result.details and result.details.get('amounts'):
@@ -1482,7 +1482,7 @@ class IntegratedNHISOrchestrator:
                     enhanced_total = len([v for v in enhanced_validations.values() if hasattr(v, 'result')])
                     enhanced_summary = f" (Enhanced: {enhanced_passed}/{enhanced_total})"
                 
-                logger.info(f"{status_emoji}{db_emoji} [{i}/{len(encounter_ids)}] {encounter_id}: {result.overall_result.value} ({actual_amount} GHS){enhanced_summary} (DB: {'✅' if result.database_updated else '❌'}) ({result.processing_time_seconds}s)")
+                logger.info(f"{status_emoji}{db_emoji} [{i}/{len(encounter_ids)}] {encounter_id}: {result.overall_result.value} ({actual_amount} GHS){enhanced_summary} (DB: {'' if result.database_updated else '❌'}) ({result.processing_time_seconds}s)")
                 
             except Exception as e:
                 logger.error(f"❌ Critical error processing {encounter_id}: {e}")
@@ -1540,7 +1540,7 @@ class IntegratedNHISOrchestrator:
     def _get_status_emoji(self, result: ValidationResult) -> str:
         """Get appropriate emoji for validation result"""
         emoji_map = {
-            ValidationResult.APPROVED: "✅",
+            ValidationResult.APPROVED: "",
             ValidationResult.REJECTED: "❌", 
             ValidationResult.PARTIAL: "🟨",
             ValidationResult.PENDING: "⏳",
@@ -1634,7 +1634,7 @@ class IntegratedNHISOrchestrator:
                 "db_updates_successful": db_updates_successful,
                 "db_updates_failed": db_updates_failed,
                 "db_update_success_rate": round((db_updates_successful / total_claims) * 100, 1) if total_claims > 0 else 0,
-                "integration_status": "✅ ACTIVE" if db_updates_successful > 0 else "❌ FAILED"
+                "integration_status": " ACTIVE" if db_updates_successful > 0 else "❌ FAILED"
             },
             "financial_summary": {
                 "total_approved_amount": round(total_approved_amount, 2),
@@ -1667,11 +1667,11 @@ async def interactive_main():
         
         print(f"\n🎯 NHIS EXPERT SYSTEM - INTERACTIVE MODE")
         print("=" * 80)
-        print(f"🚀 System Status: ✅ READY")
-        print(f"💾 Database Integration: ✅ ACTIVE")
-        print(f"🔧 Auto Database Updates: ✅ ENABLED")
-        print(f"🔍 Enhanced Validations: ✅ INTEGRATED")
-        print(f"📊 Expert System Pipeline: ✅ OPERATIONAL")
+        print(f"🚀 System Status:  READY")
+        print(f"💾 Database Integration:  ACTIVE")
+        print(f"🔧 Auto Database Updates:  ENABLED")
+        print(f"🔍 Enhanced Validations:  INTEGRATED")
+        print(f"📊 Expert System Pipeline:  OPERATIONAL")
         
         while True:
             # Display menu and get user choice
@@ -1693,11 +1693,11 @@ async def interactive_main():
                 break
         
         print(f"\n🎯 SESSION SUMMARY:")
-        print(f"  ✅ Expert System: Fully operational")
-        print(f"  ✅ Enhanced Validations: Fully integrated")
-        print(f"  ✅ Database Integration: Active")
-        print(f"  ✅ Claims Processing: Completed successfully")
-        print(f"  ✅ Pipeline Validation: All stages functional")
+        print(f"   Expert System: Fully operational")
+        print(f"   Enhanced Validations: Fully integrated")
+        print(f"   Database Integration: Active")
+        print(f"   Claims Processing: Completed successfully")
+        print(f"   Pipeline Validation: All stages functional")
         
     except KeyboardInterrupt:
         print(f"\n\n⚠️ System interrupted by user")
@@ -1712,7 +1712,7 @@ async def interactive_main():
     finally:
         print(f"\n🔧 Closing system connections...")
         await orchestrator.close()
-        print(f"✅ NHIS Expert System shutdown complete")
+        print(f" NHIS Expert System shutdown complete")
 
 
 # UPDATED main function with enhanced validations
@@ -1753,7 +1753,7 @@ async def main():
         print(f"  Overall Result: {result.overall_result.value}")
         print(f"  Final Stage: {result.processing_stage.value}")
         print(f"  Processing Time: {result.processing_time_seconds}s")
-        print(f"  Database Updated: {'✅ YES' if result.database_updated else '❌ NO'}")
+        print(f"  Database Updated: {' YES' if result.database_updated else '❌ NO'}")
         print(f"  Reason: {result.reason}")
         
         if result.details:
@@ -1772,7 +1772,7 @@ async def main():
                 print(f"\n🔍 ENHANCED VALIDATIONS RESULTS:")
                 for validation_type, validation_result in enhanced_results.items():
                     if validation_type != 'summary' and hasattr(validation_result, 'result'):
-                        status_emoji = "✅" if validation_result.result.value == "APPROVED" else "⚠️" if validation_result.result.value == "FLAGGED" else "❌"
+                        status_emoji = "" if validation_result.result.value == "APPROVED" else "⚠️" if validation_result.result.value == "FLAGGED" else "❌"
                         print(f"  {status_emoji} {validation_type.replace('_', ' ').title()}: {validation_result.result.value}")
                         if validation_result.result.value != "APPROVED":
                             print(f"    Reason: {validation_result.reason}")
@@ -1780,7 +1780,7 @@ async def main():
             # Show financial summary with breakdown
             if result.details.get('amounts'):
                 amounts = result.details['amounts']
-                print(f"\n💰 FINANCIAL SUMMARY:")
+                print(f"\n FINANCIAL SUMMARY:")
                 print(f"  Total Claimed: {amounts.get('total_claimed', 0)} GHS")
                 print(f"  Approved: {amounts.get('approved', 0)} GHS")
                 print(f"  Partial: {amounts.get('partial', 0)} GHS")
@@ -1788,7 +1788,7 @@ async def main():
                 
                 # Show breakdown if available
                 if amounts.get('gdrg_tariff') or amounts.get('medicine_cost'):
-                    print(f"\n💰 BREAKDOWN:")
+                    print(f"\n BREAKDOWN:")
                     print(f"  G-DRG Tariff: {amounts.get('gdrg_tariff', 0)} GHS")
                     print(f"  Medicine Cost: {amounts.get('medicine_cost', 0)} GHS")
                     print(f"  Investigation Cost: {amounts.get('investigation_cost', 0)} GHS")
@@ -1798,25 +1798,25 @@ async def main():
             # Show database update status
             database_updated = result.details.get('database_updated', False)
             print(f"\n💾 DATABASE INTEGRATION STATUS:")
-            print(f"  Database Updated: {'✅ SUCCESS' if database_updated else '❌ FAILED'}")
-            print(f"  Expert System Results: {'✅ PERSISTED' if database_updated else '⚠️ NOT PERSISTED'}")
-            print(f"  Enhanced Validation Results: {'✅ SAVED TO DB' if database_updated else '⚠️ NOT SAVED'}")
-            print(f"  Financial Data: {'✅ SAVED TO DB' if database_updated else '⚠️ NOT SAVED'}")
-            print(f"  Audit Trail: {'✅ COMPLETE' if database_updated else '⚠️ INCOMPLETE'}")
+            print(f"  Database Updated: {' SUCCESS' if database_updated else '❌ FAILED'}")
+            print(f"  Expert System Results: {' PERSISTED' if database_updated else '⚠️ NOT PERSISTED'}")
+            print(f"  Enhanced Validation Results: {' SAVED TO DB' if database_updated else '⚠️ NOT SAVED'}")
+            print(f"  Financial Data: {' SAVED TO DB' if database_updated else '⚠️ NOT SAVED'}")
+            print(f"  Audit Trail: {' COMPLETE' if database_updated else '⚠️ INCOMPLETE'}")
             
             # Show final decision
             if result.details.get('final_decision'):
                 print(f"\n🎯 FINAL DECISION: {result.details['final_decision']}")
         
-        print(f"\n✅ INTEGRATION VERIFICATION:")
-        print(f"  ✅ Expert system processing completed")
-        print(f"  ✅ Enhanced validations executed")
-        print(f"  ✅ Financial calculations accurate")
-        print(f"  ✅ Pipeline data flow working")
-        print(f"  ✅ OPDC13A special case handling integrated")
+        print(f"\n INTEGRATION VERIFICATION:")
+        print(f"   Expert system processing completed")
+        print(f"   Enhanced validations executed")
+        print(f"   Financial calculations accurate")
+        print(f"   Pipeline data flow working")
+        print(f"   OPDC13A special case handling integrated")
         if result.database_updated:
-            print(f"  ✅ Database automatically updated with results")
-            print(f"  ✅ Claims table now reflects expert system decisions")
+            print(f"   Database automatically updated with results")
+            print(f"   Claims table now reflects expert system decisions")
         else:
             print(f"  ⚠️ Database update failed - manual intervention may be required")
         
@@ -1835,7 +1835,7 @@ async def main():
         batch_overview = summary['batch_overview']
         print(f"\n📈 BATCH OVERVIEW:")
         print(f"  Total Claims: {batch_overview['total_claims']}")
-        print(f"  Approved: {batch_overview['approved']} ✅")
+        print(f"  Approved: {batch_overview['approved']} ")
         print(f"  Rejected: {batch_overview['rejected']} ❌")
         print(f"  Partial: {batch_overview['partial']} 🟨")
         print(f"  Pending: {batch_overview['pending']} ⏳")
@@ -1847,7 +1847,7 @@ async def main():
         enhanced_summary = summary['enhanced_validations_summary']
         print(f"\n🔍 ENHANCED VALIDATIONS SUMMARY:")
         print(f"  Total Enhanced Checks: {enhanced_summary['total_enhanced_checks']}")
-        print(f"  Enhanced Passed: {enhanced_summary['enhanced_passed']} ✅")
+        print(f"  Enhanced Passed: {enhanced_summary['enhanced_passed']} ")
         print(f"  Enhanced Failed: {enhanced_summary['enhanced_failed']} ❌")
         print(f"  Enhanced Flagged: {enhanced_summary['enhanced_flagged']} ⚠️")
         print(f"  Enhanced Pending: {enhanced_summary['enhanced_pending']} ⏳")
@@ -1857,14 +1857,14 @@ async def main():
         db_integration = summary['database_integration']
         print(f"\n💾 DATABASE INTEGRATION SUMMARY:")
         print(f"  Total DB Updates Attempted: {db_integration['total_db_updates_attempted']}")
-        print(f"  DB Updates Successful: {db_integration['db_updates_successful']} ✅")
+        print(f"  DB Updates Successful: {db_integration['db_updates_successful']} ")
         print(f"  DB Updates Failed: {db_integration['db_updates_failed']} ❌")
         print(f"  DB Update Success Rate: {db_integration['db_update_success_rate']}%")
         print(f"  Integration Status: {db_integration['integration_status']}")
         
         # Financial summary
         financial = summary['financial_summary']
-        print(f"\n💰 FINANCIAL SUMMARY:")
+        print(f"\n FINANCIAL SUMMARY:")
         print(f"  Total Approved Amount: {financial['total_approved_amount']} {financial['currency']}")
         print(f"  Total G-DRG Amount: {financial['total_gdrg_amount']} {financial['currency']}")
         print(f"  Total Medicine Amount: {financial['total_medicine_amount']} {financial['currency']}")

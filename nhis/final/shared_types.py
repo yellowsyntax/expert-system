@@ -40,7 +40,7 @@ class ProcessingOutcome:
     details: Dict[str, Any] = None
     timestamp: datetime = None
     processing_time_seconds: float = 0.0
-    database_updated: bool = False  # Track database update status
+    database_updated: bool = False  
     
     def __post_init__(self):
         if self.timestamp is None:

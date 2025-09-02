@@ -65,7 +65,7 @@ class FacilityCredentialingValidator:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info("✅ Facility Credentialing Validator initialized (Data-Driven Mode)")
+            logger.info(" Facility Credentialing Validator initialized (Data-Driven Mode)")
     
     async def close(self):
         """Close database connections"""
@@ -203,19 +203,19 @@ class FacilityCredentialingValidator:
                         "total_steps": len(step_results["steps_completed"]),
                         "steps_passed": len(step_results["steps_passed"]),
                         "steps_failed": len(step_results["steps_failed"]),
-                        "facility_info": "✅ Found",
-                        "level_eligibility": "✅ Authorized", 
-                        "age_requirements": "✅ Met",
-                        "gender_requirements": "✅ Met"
+                        "facility_info": " Found",
+                        "level_eligibility": " Authorized", 
+                        "age_requirements": " Met",
+                        "gender_requirements": " Met"
                     }
                 }
             )
             
-            logger.info(f"✅ STEP 4 PASSED (Data-Driven) for {encounter_id}: {claim_data['provider_name']} Level {claim_data['healthcare_level']}")
+            logger.info(f" STEP 4 PASSED (Data-Driven) for {encounter_id}: {claim_data['provider_name']} Level {claim_data['healthcare_level']}")
             return final_result
             
         except Exception as e:
-            logger.error(f"❌ Error in Step 4 credentialing check: {e}")
+            logger.error(f" Error in Step 4 credentialing check: {e}")
             step_results["steps_failed"].append({
                 "step": "system_error",
                 "status": "ERROR",
@@ -373,7 +373,7 @@ class FacilityCredentialingValidator:
             
             if not all_results:
                 # If strict matching failed, try without encounter type filter
-                logger.warning(f"⚠️ No results with encounter type filter, trying without filter...")
+                logger.warning(f" No results with encounter type filter, trying without filter...")
                 
                 # Try diagnosis without encounter type filter
                 loose_diagnosis_query = """
@@ -409,7 +409,7 @@ class FacilityCredentialingValidator:
                 all_results = list(loose_diagnosis_results) + list(loose_procedure_results)
                 
                 if not all_results:
-                    logger.error(f"❌ G-DRG {gdrg_code} not found in any clinical inference table")
+                    logger.error(f" G-DRG {gdrg_code} not found in any clinical inference table")
                     
                     # Final fallback to icd10_codes table
                     icd10_fallback = await self.queries.get_tariff_by_gdrg(gdrg_code)
@@ -451,7 +451,7 @@ class FacilityCredentialingValidator:
             # If no exact match, use first available
             if not best_match:
                 best_match = all_results[0]
-                logger.warning(f"⚠️ Using encounter type '{best_match['encounter_type']}' instead of requested '{encounter_type}'")
+                logger.warning(f" Using encounter type '{best_match['encounter_type']}' instead of requested '{encounter_type}'")
             
             gdrg_info = best_match
             
@@ -516,7 +516,7 @@ class FacilityCredentialingValidator:
                     }
                 )
             
-            logger.info(f"✅ Level {facility_level} is authorized for G-DRG {gdrg_code}")
+            logger.info(f" Level {facility_level} is authorized for G-DRG {gdrg_code}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -717,7 +717,7 @@ class FacilityCredentialingValidator:
                 results[encounter_id] = result
                 
                 # Log summary
-                status_emoji = "✅" if result.result == ValidationResult.APPROVED else "❌"
+                status_emoji = "" if result.result == ValidationResult.APPROVED else ""
                 logger.info(f"{status_emoji} {encounter_id}: {result.reason}")
                 
             except Exception as e:
@@ -784,7 +784,7 @@ async def main():
             print(f"  Overall Result: {step_results['overall_result']}")
             
             if step_results['steps_passed']:
-                print(f"\n  ✅ PASSED STEPS:")
+                print(f"\n   PASSED STEPS:")
                 for step in step_results['steps_passed']:
                     print(f"    {step['step']}: {step['message']}")
                     if step.get('details'):
@@ -793,7 +793,7 @@ async def main():
                                 print(f"      {key}: {value}")
             
             if step_results['steps_failed']:
-                print(f"\n  ❌ FAILED STEPS:")
+                print(f"\n   FAILED STEPS:")
                 for step in step_results['steps_failed']:
                     print(f"    {step['step']}: {step['message']}")
                     if step.get('details'):
@@ -808,9 +808,9 @@ async def main():
         
         print(f"\n📊 BATCH VALIDATION SUMMARY:")
         print(f"  Total Claims: {summary['total_claims']}")
-        print(f"  Approved: {summary['approved']} ✅")
-        print(f"  Rejected: {summary['rejected']} ❌")
-        print(f"  Flagged: {summary['flagged']} ⚠️")
+        print(f"  Approved: {summary['approved']} ")
+        print(f"  Rejected: {summary['rejected']} ")
+        print(f"  Flagged: {summary['flagged']} ")
         print(f"  Pending: {summary['pending']} ⏳")
         print(f"  Success Rate: {summary['success_rate']}%")
         

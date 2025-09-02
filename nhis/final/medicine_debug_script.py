@@ -21,7 +21,7 @@ async def debug_complete_pipeline(encounter_id):
         orchestrator = EnhancedNHISOrchestrator()
         await orchestrator.initialize()
         
-        print(f"✅ Orchestrator initialized")
+        print(f" Orchestrator initialized")
         
         # Create pipeline results structure
         pipeline_results = {
@@ -43,11 +43,11 @@ async def debug_complete_pipeline(encounter_id):
             "enhanced_medicine_validation": {}
         }
         
-        print(f"\n🚀 TESTING EACH STAGE INDIVIDUALLY:")
+        print(f"\n TESTING EACH STAGE INDIVIDUALLY:")
         print("=" * 50)
         
-        # STAGE 1: INITIAL PROCESSING
-        print(f"\n1️⃣ STAGE 1: Initial Processing")
+        
+        print(f"\n1️ STAGE 1: Initial Processing")
         print("-" * 30)
         
         try:
@@ -58,16 +58,16 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 1")
+                print(f"    PIPELINE FAILS AT STAGE 1")
                 await orchestrator.close()
                 return
             
-            # Extract encounter type for next stages
+            
             encounter_type = stage_result.details.get('encounter_type') if stage_result.details else None
             print(f"   Encounter Type: {encounter_type}")
             
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 1: {e}")
+            print(f"    ERROR in Stage 1: {e}")
             await orchestrator.close()
             return
         
@@ -83,12 +83,12 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 2")
+                print(f"    PIPELINE FAILS AT STAGE 2")
                 await orchestrator.close()
                 return
                 
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 2: {e}")
+            print(f"    ERROR in Stage 2: {e}")
             await orchestrator.close()
             return
         
@@ -104,12 +104,12 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 3")
+                print(f"    PIPELINE FAILS AT STAGE 3")
                 await orchestrator.close()
                 return
                 
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 3: {e}")
+            print(f"    ERROR in Stage 3: {e}")
             await orchestrator.close()
             return
         
@@ -125,12 +125,12 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 4")
+                print(f"    PIPELINE FAILS AT STAGE 4")
                 await orchestrator.close()
                 return
                 
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 4: {e}")
+            print(f"    ERROR in Stage 4: {e}")
             await orchestrator.close()
             return
         
@@ -146,12 +146,12 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 5")
+                print(f"    PIPELINE FAILS AT STAGE 5")
                 await orchestrator.close()
                 return
                 
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 5: {e}")
+            print(f"    ERROR in Stage 5: {e}")
             await orchestrator.close()
             return
         
@@ -167,23 +167,23 @@ async def debug_complete_pipeline(encounter_id):
             print(f"   Reason: {stage_result.reason}")
             
             if not success:
-                print(f"   ❌ PIPELINE FAILS AT STAGE 6")
+                print(f"    PIPELINE FAILS AT STAGE 6")
                 await orchestrator.close()
                 return
                 
         except Exception as e:
-            print(f"   ❌ ERROR in Stage 6: {e}")
+            print(f"    ERROR in Stage 6: {e}")
             await orchestrator.close()
             return
         
-        print(f"\n✅ ALL STAGES PASSED INDIVIDUALLY!")
+        print(f"\n ALL STAGES PASSED INDIVIDUALLY!")
         print(f"   This means the issue is in the complete pipeline flow")
         print(f"   or in the error handling/reporting logic")
         
         await orchestrator.close()
         
     except Exception as e:
-        print(f"❌ CRITICAL ERROR: {e}")
+        print(f" CRITICAL ERROR: {e}")
         import traceback
         traceback.print_exc()
 

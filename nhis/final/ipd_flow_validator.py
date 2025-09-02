@@ -66,7 +66,7 @@ class IPDFlowValidator:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info("✅ IPD Flow Validator initialized")
+            logger.info(" IPD Flow Validator initialized")
     
     async def close(self):
         """Close database connections"""
@@ -204,10 +204,10 @@ class IPDFlowValidator:
                     "next_step": "Step 4: Credentialing & Level Check",
                     "step_by_step_results": step_results,
                     "ipd_summary": {
-                        "discharge_validation": "✅ Present",
-                        "bill_timing": "✅ After discharge",
-                        "procedures_rule": f"✅ {procedures_check.details.get('rule_applied', 'Standard')}",
-                        "readmission_check": "✅ No violations"
+                        "discharge_validation": " Present",
+                        "bill_timing": " After discharge",
+                        "procedures_rule": f" {procedures_check.details.get('rule_applied', 'Standard')}",
+                        "readmission_check": " No violations"
                     },
                     "validation_summary": {
                         "total_steps": len(step_results["steps_completed"]),
@@ -217,11 +217,11 @@ class IPDFlowValidator:
                 }
             )
             
-            logger.info(f"✅ IPD FLOW COMPLETED for {encounter_id}: Ready for Step 4")
+            logger.info(f" IPD FLOW COMPLETED for {encounter_id}: Ready for Step 4")
             return final_result
             
         except Exception as e:
-            logger.error(f"❌ Error in IPD flow validation: {e}")
+            logger.error(f" Error in IPD flow validation: {e}")
             step_results["steps_failed"].append({
                 "step": "system_error",
                 "status": "ERROR",
@@ -297,7 +297,7 @@ class IPDFlowValidator:
             
             length_of_stay = self._calculate_length_of_stay(claim_data)
             
-            logger.info(f"✅ Discharge date present: {discharge_date} (LOS: {length_of_stay} days)")
+            logger.info(f" Discharge date present: {discharge_date} (LOS: {length_of_stay} days)")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -345,7 +345,7 @@ class IPDFlowValidator:
             # Patient has been discharged - bill can be processed
             length_of_stay = self._calculate_length_of_stay(claim_data)
             
-            logger.info(f"✅ Patient discharged - bill can be processed (LOS: {length_of_stay} days)")
+            logger.info(f" Patient discharged - bill can be processed (LOS: {length_of_stay} days)")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -406,7 +406,7 @@ class IPDFlowValidator:
                 for i in range(1, len(procedure_codes)):
                     payment_percentages.append(20)  # Additional procedures get 20%
                 
-                logger.info(f"✅ Multiple procedures detected: {len(procedure_codes)} procedures")
+                logger.info(f" Multiple procedures detected: {len(procedure_codes)} procedures")
                 
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED,
@@ -468,7 +468,7 @@ class IPDFlowValidator:
                 # 3. Same facility or different facility
                 
                 # For this implementation, we'll assume no violations unless specific criteria are met
-                logger.info(f"✅ Emergency readmission check: no violations detected")
+                logger.info(f" Emergency readmission check: no violations detected")
                 
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED,
@@ -537,7 +537,7 @@ class IPDFlowValidator:
                 results[encounter_id] = result
                 
                 # Log summary
-                status_emoji = "✅" if result.result == ValidationResult.APPROVED else "❌"
+                status_emoji = "" if result.result == ValidationResult.APPROVED else ""
                 los = ""
                 if result.details and result.details.get('length_of_stay'):
                     los = f" (LOS: {result.details['length_of_stay']} days)"
@@ -627,14 +627,14 @@ async def main():
             print(f"  Overall Result: {step_results['overall_result']}")
             
             if step_results['steps_passed']:
-                print(f"\n  ✅ PASSED STEPS:")
+                print(f"\n   PASSED STEPS:")
                 for step in step_results['steps_passed']:
                     print(f"    {step['step']}: {step['status']} - {step['message']}")
                     if step.get('details') and len(str(step['details'])) < 300:
                         print(f"      Details: {step['details']}")
             
             if step_results['steps_failed']:
-                print(f"\n  ❌ FAILED STEPS:")
+                print(f"\n   FAILED STEPS:")
                 for step in step_results['steps_failed']:
                     print(f"    {step['step']}: {step['status']} - {step['message']}")
         
@@ -663,9 +663,9 @@ async def main():
         
         print(f"\n📊 BATCH VALIDATION SUMMARY:")
         print(f"  Total Claims: {summary['total_claims']}")
-        print(f"  Approved: {summary['approved']} ✅")
-        print(f"  Rejected: {summary['rejected']} ❌")
-        print(f"  Flagged: {summary['flagged']} ⚠️")
+        print(f"  Approved: {summary['approved']} ")
+        print(f"  Rejected: {summary['rejected']} ")
+        print(f"  Flagged: {summary['flagged']} ")
         print(f"  Pending: {summary['pending']} ⏳")
         print(f"  Success Rate: {summary['success_rate']}%")
         
@@ -689,11 +689,11 @@ async def main():
                 
                 # Show passed steps
                 for step in step_data['steps_passed']:
-                    print(f"      ✅ {step['step']}: {step['status']}")
+                    print(f"       {step['step']}: {step['status']}")
                 
                 # Show failed steps  
                 for step in step_data['steps_failed']:
-                    print(f"      ❌ {step['step']}: {step['status']} - {step['message']}")
+                    print(f"       {step['step']}: {step['status']} - {step['message']}")
             
             # Show LOS if available
             if claim_result.details and claim_result.details.get('length_of_stay'):

@@ -18,7 +18,7 @@ class DuplicateType(Enum):
     """Types of duplicate claims"""
     DIFFERENT_ENCOUNTER_SAME_INFO = "DIFFERENT_ENCOUNTER_SAME_INFO"  # Different encounter_id, same info
     SAME_ENCOUNTER_DIFFERENT_INFO = "SAME_ENCOUNTER_DIFFERENT_INFO"  # Same encounter_id, different info
-    SAME_DAY_VISITS = "SAME_DAY_VISITS"  # Same patient, same day, different encounters
+    SAME_DAY_VISITS = "SAME_DAY_VISITS"  
     EXACT_DUPLICATE = "EXACT_DUPLICATE"  # Completely identical claims
     PARTIAL_DUPLICATE = "PARTIAL_DUPLICATE"  # Similar but not identical
 
@@ -27,7 +27,7 @@ class DuplicateFlag(Enum):
     CLEAN = "CLEAN"
     flagged = "flagged"
     SUSPICIOUS = "SUSPICIOUS"
-    BLOCKED = "BLOCKED"
+    
 
 @dataclass
 class DuplicateMatch:
@@ -195,7 +195,7 @@ class DuplicateClaimsDetector:
             result = await self._analyze_duplicate_matches(encounter_id, all_matches, claim)
             
             # Update database status if duplicates are found
-            if result.flag_status in [DuplicateFlag.flagged, DuplicateFlag.BLOCKED]:
+            if result.flag_status in [DuplicateFlag.flagged, DuplicateFlag.flagged]:
                 await self._update_claim_duplicate_status(encounter_id, result)
             
             logger.info(f"DUPLICATE DETECTION COMPLETED for {encounter_id}: {result.flag_status.value} ({result.total_duplicates_found} duplicates)")
@@ -1244,7 +1244,7 @@ class DuplicateClaimsDetector:
         
         # Determine flag status based on confidence and type
         if highest_confidence >= self.confidence_thresholds["high"]:
-            flag_status = DuplicateFlag.BLOCKED
+            flag_status = DuplicateFlag.flagged
             recommendation = "BLOCK: High confidence duplicate detected - manual review required"
         elif highest_confidence >= self.confidence_thresholds["medium"]:
             flag_status = DuplicateFlag.flagged
@@ -1260,7 +1260,7 @@ class DuplicateClaimsDetector:
         
         # Special handling for exact duplicates (always block)
         if DuplicateType.EXACT_DUPLICATE.value in type_counts:
-            flag_status = DuplicateFlag.BLOCKED
+            flag_status = DuplicateFlag.flagged
             recommendation = "BLOCK: Exact duplicate claim detected - likely fraudulent submission"
         
         return DuplicateDetectionResult(
@@ -1314,7 +1314,7 @@ class DuplicateClaimsDetector:
                     DuplicateFlag.CLEAN: "✅",
                     DuplicateFlag.SUSPICIOUS: "🟡", 
                     DuplicateFlag.flagged: "🚩",
-                    DuplicateFlag.BLOCKED: "🚫"
+                    DuplicateFlag.flagged: "🚫"
                 }
                 
                 indicator = status_indicator.get(result.flag_status, "❓")
@@ -1356,12 +1356,12 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
         # Track results
         clean_claims = 0
         flagged_claims = 0
-        blocked_claims = 0
+        flagged_claims = 0
         error_claims = 0
         
         database_updates = {
             "flagged_claims": [],
-            "blocked_claims": [],
+            "flagged_claims": [],
             "clean_claims": [],
             "error_claims": []
         }
@@ -1397,10 +1397,10 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
                             "confidence": result.highest_confidence_match.confidence_score
                         })
                     
-                elif result.flag_status == DuplicateFlag.BLOCKED:
-                    blocked_claims += 1
+                elif result.flag_status == DuplicateFlag.flagged:
+                    flagged_claims += 1
                     
-                    database_updates["blocked_claims"].append({
+                    database_updates["flagged_claims"].append({
                         "encounter_id": encounter_id,
                         "reason": result.recommendation,
                         "confidence": result.highest_confidence_match.confidence_score if result.highest_confidence_match else 0.0
@@ -1440,15 +1440,15 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
             "total_claims": total_claims,
             "clean_claims": clean_claims,
             "flagged_claims": flagged_claims,
-            "blocked_claims": blocked_claims,
+            "flagged_claims": flagged_claims,
             "error_claims": error_claims,
             "duplicate_detection_rate": duplicate_detection_rate
         }
         
         # Generate simple recommendations
         recommendations = []
-        if blocked_claims > 0:
-            recommendations.append(f"IMMEDIATE ACTION: {blocked_claims} claims blocked for manual review")
+        if flagged_claims > 0:
+            recommendations.append(f"IMMEDIATE ACTION: {flagged_claims} claims flagged for manual review")
         if flagged_claims > 0:
             recommendations.append(f"REVIEW REQUIRED: {flagged_claims} claims flagged for duplicate review")
         if error_claims > 0:
@@ -1460,7 +1460,7 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
         logger.info(f"  Total Claims: {total_claims}")
         logger.info(f"  Clean: {clean_claims}")
         logger.info(f"  Flagged: {flagged_claims}")
-        logger.info(f"  Blocked: {blocked_claims}")
+        logger.info(f"  flagged: {flagged_claims}")
         logger.info(f"  Errors: {error_claims}")
         logger.info(f"  Duplicate Rate: {duplicate_detection_rate}%")
         
@@ -1479,7 +1479,7 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
                 "total_claims": len(encounter_ids),
                 "clean_claims": 0,
                 "flagged_claims": 0,
-                "blocked_claims": 0,
+                "flagged_claims": 0,
                 "error_claims": len(encounter_ids),
                 "duplicate_detection_rate": 0.0
             },
@@ -1504,7 +1504,7 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
         clean_count = len([r for r in results.values() if r.flag_status == DuplicateFlag.CLEAN])
         suspicious_count = len([r for r in results.values() if r.flag_status == DuplicateFlag.SUSPICIOUS])
         flagged_count = len([r for r in results.values() if r.flag_status == DuplicateFlag.flagged])
-        blocked_count = len([r for r in results.values() if r.flag_status == DuplicateFlag.BLOCKED])
+        flagged_count = len([r for r in results.values() if r.flag_status == DuplicateFlag.flagged])
         
         # Duplicate type analysis
         duplicate_type_stats = {}
@@ -1525,8 +1525,8 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
         
         # Generate recommendations
         recommendations = []
-        if blocked_count > 0:
-            recommendations.append(f"IMMEDIATE ACTION: {blocked_count} claims should be blocked for manual review")
+        if flagged_count > 0:
+            recommendations.append(f"IMMEDIATE ACTION: {flagged_count} claims should be flagged for manual review")
         if flagged_count > 0:
             recommendations.append(f"REVIEW REQUIRED: {flagged_count} claims flagged for duplicate review")
         if suspicious_count > 0:
@@ -1534,7 +1534,7 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
         
         # Calculate rates
         duplicate_rate = round(((total_claims - clean_count) / total_claims * 100), 2) if total_claims > 0 else 0
-        block_rate = round((blocked_count / total_claims * 100), 2) if total_claims > 0 else 0
+        block_rate = round((flagged_count / total_claims * 100), 2) if total_claims > 0 else 0
         
         return {
             "summary_statistics": {
@@ -1542,7 +1542,7 @@ async def run_duplicate_detection_stage(encounter_ids: List[str]) -> Dict[str, A
                 "clean_claims": clean_count,
                 "suspicious_claims": suspicious_count,
                 "flagged_claims": flagged_count,
-                "blocked_claims": blocked_count,
+                "flagged_claims": flagged_count,
                 "duplicate_detection_rate": duplicate_rate,
                 "block_rate": block_rate
             },
@@ -1707,7 +1707,7 @@ async def main_duplicate_detection():
         print(f"Total Claims Analyzed: {report['summary_statistics']['total_claims_analyzed']}")
         print(f"Clean Claims: {report['summary_statistics']['clean_claims']}")
         print(f"Flagged Claims: {report['summary_statistics']['flagged_claims']}")
-        print(f"Blocked Claims: {report['summary_statistics']['blocked_claims']}")
+        print(f"flagged Claims: {report['summary_statistics']['flagged_claims']}")
         print(f"Duplicate Detection Rate: {report['summary_statistics']['duplicate_detection_rate']}%")
         
         print("\n=== INDIVIDUAL RESULTS ===")

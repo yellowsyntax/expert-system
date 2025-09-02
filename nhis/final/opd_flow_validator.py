@@ -373,7 +373,7 @@ class OPDFlowValidator:
             await self._ensure_query_methods()
             
             self.is_initialized = True
-            logger.info("✅ Production OPD Flow Validator initialized")
+            logger.info(" Production OPD Flow Validator initialized")
     
     async def _ensure_query_methods(self):
         """Ensure all required query methods exist"""
@@ -689,11 +689,11 @@ class OPDFlowValidator:
                     "payment_rule": payment_result.payment_rule,
                     "cost_impact": cost_analysis.get("total_impact", Decimal('0')),
                     "production_summary": {
-                        "episode_classification": f"✅ {episode_type.value}",
-                        "visit_limits": f"✅ {visit_limits_result.reason}",
-                        "payment_rule": f"✅ {payment_result.details.get('rule_applied', 'Standard')}",
-                        "procedures": f"✅ {zoom_result.reason}",
-                        "physiotherapy": f"✅ {physio_result.reason}",
+                        "episode_classification": f" {episode_type.value}",
+                        "visit_limits": f" {visit_limits_result.reason}",
+                        "payment_rule": f" {payment_result.details.get('rule_applied', 'Standard')}",
+                        "procedures": f" {zoom_result.reason}",
+                        "physiotherapy": f" {physio_result.reason}",
                         "cost_category": cost_analysis.get("cost_category", "Standard")
                     }
                 },
@@ -702,7 +702,7 @@ class OPDFlowValidator:
             )
             
         except Exception as e:
-            logger.error(f"❌ Error in production OPD flow validation: {e}")
+            logger.error(f" Error in production OPD flow validation: {e}")
             step_results["steps_failed"].append({
                 "step": "system_error",
                 "status": "ERROR",
@@ -1100,7 +1100,7 @@ class OPDFlowValidator:
                     "rule_applied": "Multi-specialty same day"
                 }
             
-            logger.info(f"💰 Payment rule applied: {rule_applied}")
+            logger.info(f" Payment rule applied: {rule_applied}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -1757,7 +1757,7 @@ class OPDFlowValidator:
                 results[encounter_id] = result
                 
                 # Log summary with cost impact
-                status_emoji = "✅" if result.result == ValidationResult.APPROVED else "❌"
+                status_emoji = "" if result.result == ValidationResult.APPROVED else ""
                 episode_type = ""
                 cost_impact = ""
                 
@@ -2023,9 +2023,9 @@ Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 Claims Analyzed: {len(encounter_ids)}
 
 ## EXECUTIVE SUMMARY
-✅ Success Rate: {analytics['summary_statistics']['success_rate']}%
-⚠️  Flag Rate: {analytics['summary_statistics']['flag_rate']}%
-❌ Rejection Rate: {analytics['summary_statistics']['rejection_rate']}%
+ Success Rate: {analytics['summary_statistics']['success_rate']}%
+  Flag Rate: {analytics['summary_statistics']['flag_rate']}%
+ Rejection Rate: {analytics['summary_statistics']['rejection_rate']}%
 
 ## EPISODE ANALYSIS
 """
@@ -2102,9 +2102,9 @@ async def main():
         print(f"\n📈 SUMMARY STATISTICS:")
         summary = analytics['summary_statistics']
         print(f"  Total Claims: {summary['total_claims']}")
-        print(f"  Success Rate: {summary['success_rate']}% ✅")
-        print(f"  Flag Rate: {summary['flag_rate']}% ⚠️")
-        print(f"  Rejection Rate: {summary['rejection_rate']}% ❌")
+        print(f"  Success Rate: {summary['success_rate']}% ")
+        print(f"  Flag Rate: {summary['flag_rate']}% ")
+        print(f"  Rejection Rate: {summary['rejection_rate']}% ")
         
         print(f"\n🏥 EPISODE ANALYSIS:")
         episode_analysis = analytics['episode_analysis']
@@ -2113,7 +2113,7 @@ async def main():
                 success_rate = episode_analysis['episode_success_rates'][episode]
                 print(f"  {episode}: {count} claims ({success_rate}% success)")
         
-        print(f"\n💰 PAYMENT OPTIMIZATION:")
+        print(f"\n PAYMENT OPTIMIZATION:")
         payment_analysis = analytics['payment_analysis']
         print(f"  Multi-Specialty Cases: {payment_analysis['multi_specialty_cases']}")
         print(f"  Total Cost Savings: ₵{payment_analysis['total_cost_savings']:.2f}")
@@ -2186,13 +2186,13 @@ async def main():
                 print(f"  {key.replace('_', ' ').title()}: {value}")
         
         print(f"\n🎯 PRODUCTION FEATURES VALIDATED:")
-        print(f"  ✅ Real Visit Limits Enforcement (FLAG/REJECT thresholds)")
-        print(f"  ✅ Specialty Payment Hierarchy with Cost Savings")
-        print(f"  ✅ ZOOM Procedures with Documentation Requirements")
-        print(f"  ✅ Physiotherapy Session Limits & Frequency Rules")
-        print(f"  ✅ Comprehensive Cost Impact Analysis")
-        print(f"  ✅ Production Analytics & Reporting")
-        print(f"  ✅ Database Integration with Smart Query Creation")
+        print(f"   Real Visit Limits Enforcement (FLAG/REJECT thresholds)")
+        print(f"   Specialty Payment Hierarchy with Cost Savings")
+        print(f"   ZOOM Procedures with Documentation Requirements")
+        print(f"   Physiotherapy Session Limits & Frequency Rules")
+        print(f"   Comprehensive Cost Impact Analysis")
+        print(f"   Production Analytics & Reporting")
+        print(f"   Database Integration with Smart Query Creation")
         
     except Exception as e:
         logger.error(f"Production test failed: {e}")

@@ -99,7 +99,7 @@ class AEFlowValidator:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info("✅ A&E Flow Validator initialized")
+            logger.info(" A&E Flow Validator initialized")
     
     async def close(self):
         """Close database connections"""
@@ -205,9 +205,9 @@ class AEFlowValidator:
                     "next_step": self._get_next_step(ae_classification),
                     "step_by_step_results": step_results,
                     "ae_summary": {
-                        "classification": f"✅ {ae_classification}",
+                        "classification": f" {ae_classification}",
                         "payment_rules": classification_check.details['payment_rules']['description'],
-                        "imaging_check": "✅ Validated" if imaging_check.result != ValidationResult.FLAGGED else "⚠️ Flagged",
+                        "imaging_check": " Validated" if imaging_check.result != ValidationResult.FLAGGED else " Flagged",
                         "tariff_applied": rules_application.details.get('tariff_type', 'Standard')
                     },
                     "validation_summary": {
@@ -218,11 +218,11 @@ class AEFlowValidator:
                 }
             )
             
-            logger.info(f"✅ A&E FLOW COMPLETED for {encounter_id}: {ae_classification}, ready for {self._get_next_step(ae_classification)}")
+            logger.info(f" A&E FLOW COMPLETED for {encounter_id}: {ae_classification}, ready for {self._get_next_step(ae_classification)}")
             return final_result
             
         except Exception as e:
-            logger.error(f"❌ Error in A&E flow validation: {e}")
+            logger.error(f" Error in A&E flow validation: {e}")
             step_results["steps_failed"].append({
                 "step": "system_error",
                 "status": "ERROR",
@@ -433,7 +433,7 @@ class AEFlowValidator:
                     }
                 )
             
-            logger.info(f"✅ Emergency imaging justification validated")
+            logger.info(f" Emergency imaging justification validated")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -541,7 +541,7 @@ class AEFlowValidator:
                     "next_validations": ["Standard Validations"]
                 }
             
-            logger.info(f"✅ Applied {ae_classification} rules: {rules_applied['flow_type']} flow")
+            logger.info(f" Applied {ae_classification} rules: {rules_applied['flow_type']} flow")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -578,7 +578,7 @@ class AEFlowValidator:
                 results[encounter_id] = result
                 
                 # Log summary
-                status_emoji = "✅" if result.result == ValidationResult.APPROVED else "❌"
+                status_emoji = "" if result.result == ValidationResult.APPROVED else ""
                 classification = ""
                 if result.details and result.details.get('ae_classification'):
                     classification = f" ({result.details['ae_classification']})"
@@ -669,14 +669,14 @@ async def main():
             print(f"  Overall Result: {step_results['overall_result']}")
             
             if step_results['steps_passed']:
-                print(f"\n  ✅ PASSED STEPS:")
+                print(f"\n   PASSED STEPS:")
                 for step in step_results['steps_passed']:
                     print(f"    {step['step']}: {step['status']} - {step['message']}")
                     if step.get('details') and len(str(step['details'])) < 300:
                         print(f"      Details: {step['details']}")
             
             if step_results['steps_failed']:
-                print(f"\n  ❌ FAILED STEPS:")
+                print(f"\n   FAILED STEPS:")
                 for step in step_results['steps_failed']:
                     print(f"    {step['step']}: {step['status']} - {step['message']}")
         
@@ -695,9 +695,9 @@ async def main():
         
         print(f"\n📊 BATCH VALIDATION SUMMARY:")
         print(f"  Total Claims: {summary['total_claims']}")
-        print(f"  Approved: {summary['approved']} ✅")
-        print(f"  Rejected: {summary['rejected']} ❌")
-        print(f"  Flagged: {summary['flagged']} ⚠️")
+        print(f"  Approved: {summary['approved']} ")
+        print(f"  Rejected: {summary['rejected']} ")
+        print(f"  Flagged: {summary['flagged']} ")
         print(f"  Pending: {summary['pending']} ⏳")
         print(f"  Success Rate: {summary['success_rate']}%")
         
@@ -727,19 +727,19 @@ async def main():
                 
                 # Show passed steps
                 for step in step_data['steps_passed']:
-                    print(f"      ✅ {step['step']}: {step['status']}")
+                    print(f"       {step['step']}: {step['status']}")
                 
                 # Show failed steps  
                 for step in step_data['steps_failed']:
-                    print(f"      ❌ {step['step']}: {step['status']} - {step['message']}")
+                    print(f"       {step['step']}: {step['status']} - {step['message']}")
         
         print(f"\n🎯 A&E FLOW VALIDATION FEATURES:")
-        print(f"  ✅ A&E Classification (OPD-like/Detained <24h/Admission)")
-        print(f"  ✅ Emergency Imaging Justification Check")
-        print(f"  ✅ Payment Rules Application (OPD/ZOOM02A/IPD)")
-        print(f"  ✅ Length of Stay Assessment")
-        print(f"  ✅ Condition-based Classification Logic")
-        print(f"  ✅ Automatic Flow Routing")
+        print(f"   A&E Classification (OPD-like/Detained <24h/Admission)")
+        print(f"   Emergency Imaging Justification Check")
+        print(f"   Payment Rules Application (OPD/ZOOM02A/IPD)")
+        print(f"   Length of Stay Assessment")
+        print(f"   Condition-based Classification Logic")
+        print(f"   Automatic Flow Routing")
         
     except Exception as e:
         logger.error(f"Test failed: {e}")

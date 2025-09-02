@@ -34,7 +34,10 @@ class NeonDBConnection:
     def __init__(self):
         # Default connection string - can be overridden
         self.database_url = os.getenv(
-            "DATABASE_URL", 
+           # "DATABASE_URL", 
+            #"postgresql://postgres:LM2GGiGjaKtCVJNvPZRk@paiv-rds-master.cmpgm4w8w0fx.us-east-1.rds.amazonaws.com/postgres?sslmode=require"
+        #)
+        "DATABASE_URL", 
             "postgresql://neondb_owner:npg_Emq9gohbK8se@ep-sweet-hill-a46reakw-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
         )
         self.is_connected = False
@@ -43,12 +46,12 @@ class NeonDBConnection:
             'max_size': 20,
             'command_timeout': 60,
             'server_settings': {
-                'jit': 'off'  # Disable JIT for better connection stability
+                'jit': 'off'  
             }
         }
     
     async def connect(self):
-        """Initialize database connection pool"""
+        
         if self._pool is None:
             try:
                 logger.info("Connecting to Neon database...")
@@ -57,7 +60,7 @@ class NeonDBConnection:
                     **self.pool_config
                 )
                 self.is_connected = True
-                logger.info(f"✅ Database pool created successfully (min: {self.pool_config['min_size']}, max: {self.pool_config['max_size']})")
+                logger.info(f" Database pool created successfully (min: {self.pool_config['min_size']}, max: {self.pool_config['max_size']})")
                 
                 # Test connection
                 await self.test_connection()
@@ -82,7 +85,7 @@ class NeonDBConnection:
         """Test database connection with a simple query"""
         try:
             result = await self.fetch_one("SELECT 1 as test, NOW() as timestamp")
-            logger.info(f"✅ Database connection test successful: {result}")
+            logger.info(f" Database connection test successful: {result}")
             return True
         except Exception as e:
             logger.error(f"❌ Database connection test failed: {e}")
@@ -374,7 +377,7 @@ class NHISQueries:
             # Convert to sorted list
             authorized_gdrgs = sorted(list(all_gdrgs))
             
-            logger.info(f"✅ Found {len(authorized_gdrgs)} authorized G-DRGs for Level {healthcare_level}")
+            logger.info(f" Found {len(authorized_gdrgs)} authorized G-DRGs for Level {healthcare_level}")
             logger.debug(f"Authorized G-DRGs for Level {healthcare_level}: {authorized_gdrgs}")
             
             return authorized_gdrgs
@@ -714,7 +717,7 @@ async def main():
         print(f"\n🏥 TESTING DYNAMIC FACILITY G-DRG AUTHORIZATION:")
         facility = await queries.get_facility_info_by_name("LINK ROAD HOSPITAL")
         if facility:
-            print(f"✅ Facility: {facility['provider_name']}")
+            print(f" Facility: {facility['provider_name']}")
             print(f"   Level: {facility['facility_level']}")
             print(f"   Authorized G-DRGs: {len(facility['authorized_gdrgs'])}")
             print(f"   MEDI14A Authorized: {'MEDI14A' in facility['authorized_gdrgs']}")
@@ -728,7 +731,7 @@ async def main():
         for level, data in summary.items():
             print(f"   {level}: {data['count']} G-DRGs authorized")
             if 'MEDI14A' in data['gdrgs']:
-                print(f"      ✅ MEDI14A is authorized for {level}")
+                print(f"       MEDI14A is authorized for {level}")
             else:
                 print(f"      ❌ MEDI14A NOT authorized for {level}")
         
@@ -736,7 +739,7 @@ async def main():
         print(f"\n📋 TESTING CLAIM LOOKUP:")
         claim = await queries.get_claim_by_encounter_id("LIN-4881-BEEU")
         if claim:
-            print(f"✅ Claim: {claim['encounter_id']}")
+            print(f" Claim: {claim['encounter_id']}")
             print(f"   Provider: {claim['provider_name']}")
             print(f"   G-DRG: {claim['gdrg_code']}")
             print(f"   ICD-10: {claim['icd10_code']}")
@@ -745,12 +748,12 @@ async def main():
             print("❌ Claim not found")
         
         # Test NEW tariff lookup methods
-        print(f"\n💰 TESTING TARIFF LOOKUP METHODS:")
+        print(f"\n TESTING TARIFF LOOKUP METHODS:")
         
         # Test tariff by G-DRG
         tariff_by_gdrg = await queries.get_tariff_by_gdrg("MEDI14A")
         if tariff_by_gdrg:
-            print(f"✅ Tariff by G-DRG (MEDI14A): {tariff_by_gdrg['tariff_amount']} {tariff_by_gdrg['currency']}")
+            print(f" Tariff by G-DRG (MEDI14A): {tariff_by_gdrg['tariff_amount']} {tariff_by_gdrg['currency']}")
             print(f"   Description: {tariff_by_gdrg['gdrg_description']}")
         else:
             print("❌ No tariff found for MEDI14A")
@@ -758,7 +761,7 @@ async def main():
         # Test tariff by ICD-10
         tariff_by_icd = await queries.get_tariff_by_icd10("I67.9")
         if tariff_by_icd:
-            print(f"✅ Tariff by ICD-10 (I67.9): {tariff_by_icd['tariff_amount']} {tariff_by_icd['currency']}")
+            print(f" Tariff by ICD-10 (I67.9): {tariff_by_icd['tariff_amount']} {tariff_by_icd['currency']}")
             print(f"   Maps to G-DRG: {tariff_by_icd['gdrg_code']}")
         else:
             print("❌ No tariff found for I67.9")
@@ -767,7 +770,7 @@ async def main():
         print(f"\n🔍 TESTING G-DRG VALIDATION:")
         validation = await queries.validate_claim_gdrg_and_tariff("I67.9", "MEDI14A", "IPD")
         if validation.get('validation_success'):
-            print(f"✅ G-DRG Validation: PASSED")
+            print(f" G-DRG Validation: PASSED")
             print(f"   ICD-10: {validation['icd_code']} → G-DRG: {validation['expected_gdrg']}")
             print(f"   Tariff: {validation['tariff_amount']} {validation['currency']}")
         else:
@@ -814,7 +817,7 @@ async def main():
                 print(f"   ❌ PROBLEM: {claim_gdrg} not in authorized list")
                 print(f"   🔍 First 20 authorized G-DRGs: {facility_gdrgs[:20]}")
             else:
-                print(f"   ✅ SUCCESS: {claim_gdrg} is properly authorized")
+                print(f"    SUCCESS: {claim_gdrg} is properly authorized")
         
         # Test all G-DRGs with tariffs
         print(f"\n💎 TESTING ALL G-DRGS WITH TARIFFS:")
@@ -823,7 +826,7 @@ async def main():
         medi14a_found = False
         for gdrg in all_gdrgs:
             if gdrg['gdrg_code'] == 'MEDI14A':
-                print(f"   ✅ MEDI14A found: {gdrg['tariff_amount']} {gdrg['currency']}")
+                print(f"    MEDI14A found: {gdrg['tariff_amount']} {gdrg['currency']}")
                 medi14a_found = True
                 break
         if not medi14a_found:
@@ -847,6 +850,3 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
-
-
-    

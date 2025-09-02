@@ -1,44 +1,18 @@
-"""
-NHIS Expert System - Database Results Updater (COMPLETE ENHANCED VERSION)
-Updates claims_v3 table with expert system processing results
-
-ENHANCEMENTS:
-- Fixed status mapping with comprehensive constraint compliance
-- Enhanced error handling and logging
-- Improved emoji sanitization for database storage
-- Better financial calculation handling
-- Comprehensive validation results tracking
-- Support for batch processing
-"""
-
 import asyncio
 import json
 import logging
 import re
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
+import aiohttp
 
-# Import shared types to avoid circular imports
 from shared_types import ProcessingOutcome, ValidationResult, ProcessingStage
-
-# Import database connection
 from neon_db_connection import get_nhis_queries, initialize_database, close_database
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class DatabaseResultsUpdater:
-    """
-    Updates claims_v3 table with expert system processing results
-    Maintains complete audit trail and financial tracking
-    
-    ENHANCED VERSION with:
-    - Fixed status mapping using correct database constraints
-    - Comprehensive emoji sanitization for clean database storage
-    - Enhanced error handling and validation
-    - Support for all processing outcomes and edge cases
-    """
     
     def __init__(self):
         self.queries = None
@@ -48,25 +22,45 @@ class DatabaseResultsUpdater:
             'failed': 0,
             'total_processed': 0
         }
-    
+        self._current_batch_id = None
+
+    async def _trigger_websocket_update(self, encounter_id: str, batch_id: str = None,
+                                       processed_status: str = "approved"):
+        try:
+            async with aiohttp.ClientSession() as session:
+                url = "http://localhost:8000/v2/batch-monitor/trigger-update"
+                payload = {
+                    "encounter_id": encounter_id,
+                    "batch_id": batch_id,
+                    "status": "processed",
+                    "processed_status": processed_status,
+                    "timestamp": datetime.now().isoformat()
+                }
+
+                async with session.post(url, json=payload, timeout=1) as response:
+                    if response.status == 200:
+                        logger.info(f"🔄 WebSocket update triggered for {encounter_id}")
+                    else:
+                        logger.warning(f"⚠️ WebSocket trigger failed: HTTP {response.status}")
+
+        except asyncio.TimeoutError:
+            logger.debug(f"WebSocket trigger timeout for {encounter_id} (non-critical)")
+        except Exception as e:
+            logger.debug(f"WebSocket trigger error for {encounter_id}: {e} (non-critical)")
+
     async def initialize(self):
-        """Initialize database connection with enhanced validation"""
         if not self.is_initialized:
             try:
                 await initialize_database()
                 self.queries = await get_nhis_queries()
                 self.is_initialized = True
                 logger.info("🔌 Database Results Updater initialized successfully")
-                
-                # Test database connection
                 await self._test_database_connection()
-                
             except Exception as e:
                 logger.error(f"❌ Failed to initialize Database Results Updater: {e}")
                 raise
     
     async def _test_database_connection(self):
-        """Test database connection and verify claims_v3 table structure"""
         try:
             test_query = "SELECT COUNT(*) as claim_count FROM claims_v3 LIMIT 1"
             result = await self.queries.db.fetch_one(test_query)
@@ -76,7 +70,6 @@ class DatabaseResultsUpdater:
             raise
     
     async def close(self):
-        """Close database connections with stats summary"""
         if self.is_initialized:
             logger.info(f"📊 Update Statistics: {self.update_stats['successful']}/{self.update_stats['total_processed']} successful")
             await close_database()
@@ -84,17 +77,6 @@ class DatabaseResultsUpdater:
             logger.info("Database Results Updater closed")
     
     async def update_claim_processing_results(self, processing_outcome: ProcessingOutcome) -> bool:
-        """
-        MAIN UPDATE FUNCTION: Update claims_v3 with complete expert system results
-        
-        ENHANCED with comprehensive error handling and validation
-        
-        Args:
-            processing_outcome: ProcessingOutcome from master orchestrator
-            
-        Returns:
-            bool: True if update successful, False otherwise
-        """
         if not self.is_initialized:
             await self.initialize()
         
@@ -104,35 +86,25 @@ class DatabaseResultsUpdater:
         try:
             logger.info(f"DATABASE UPDATE: Processing results for {encounter_id}")
             
-            # Validate processing outcome
             if not self._validate_processing_outcome(processing_outcome):
                 logger.error(f"❌ Invalid processing outcome for {encounter_id}")
                 self.update_stats['failed'] += 1
                 return False
             
-            # Extract and validate key data
             overall_result = processing_outcome.overall_result.value
             processing_stage = processing_outcome.processing_stage.value
             processing_time = float(processing_outcome.processing_time_seconds)
             processing_reason = self._sanitize_text(processing_outcome.reason)
             
-            # Get financial data with validation
             financial_data = self._extract_and_validate_financial_data(processing_outcome)
-            
-            # Determine database status values with enhanced mapping
             claim_status, processed_status = self._determine_claim_and_processed_status(overall_result)
-            
-            # Build comprehensive data structures
             amount_breakdown = self._build_amount_breakdown_enhanced(financial_data, processing_outcome)
             validation_results = self._build_validation_results_enhanced(processing_outcome, overall_result, processing_stage)
             rejection_reasons = self._build_rejection_reasons_enhanced(processing_outcome, overall_result, processing_stage)
             inference_rules = self._build_inference_rules_enhanced(processing_outcome, financial_data)
-            
-            # Calculate derived metrics
             review_required = self._determine_review_required(overall_result, processing_outcome)
             quality_score = self._calculate_quality_score(overall_result, processing_time, processing_outcome)
             
-            # Execute database update with comprehensive error handling
             success = await self._execute_database_update_enhanced(
                 encounter_id=encounter_id,
                 claim_status=claim_status,
@@ -151,6 +123,13 @@ class DatabaseResultsUpdater:
                 self.update_stats['successful'] += 1
                 approved_amount = financial_data['approved_amount']
                 logger.info(f"✅ Database updated successfully for {encounter_id}: {processed_status} ({approved_amount} GHS)")
+                
+                try:
+                    batch_id = getattr(self, '_current_batch_id', None)
+                    await self._trigger_websocket_update(encounter_id, batch_id, processed_status)
+                except Exception as e:
+                    logger.debug(f"WebSocket trigger failed for {encounter_id}: {e}")
+                
                 return True
             else:
                 self.update_stats['failed'] += 1
@@ -165,9 +144,7 @@ class DatabaseResultsUpdater:
             return False
     
     def _validate_processing_outcome(self, processing_outcome: ProcessingOutcome) -> bool:
-        """Validate processing outcome before database update"""
         try:
-            # Check required fields
             if not processing_outcome.encounter_id:
                 logger.error("Missing encounter_id")
                 return False
@@ -187,18 +164,15 @@ class DatabaseResultsUpdater:
             return False
     
     def _extract_and_validate_financial_data(self, processing_outcome: ProcessingOutcome) -> Dict:
-        """Extract and validate financial data from processing outcome"""
         details = processing_outcome.details or {}
         amounts = details.get('amounts', {})
         financial_components = details.get('financial_components', {})
         
-        # Extract and validate amounts
         approved_amount = float(amounts.get('approved', 0.0))
         gdrg_tariff = float(amounts.get('gdrg_tariff', 0.0))
         medicine_cost = float(amounts.get('medicine_cost', 0.0))
         investigation_cost = float(amounts.get('investigation_cost', 0.0))
         
-        # Determine amount distribution based on result
         overall_result = processing_outcome.overall_result.value
         
         if overall_result in ['APPROVED', 'FINAL_APPROVED']:
@@ -221,12 +195,10 @@ class DatabaseResultsUpdater:
             rejected_amount = 0.0
             pending_amount = 0.0
         elif overall_result == 'PARTIAL':
-            # For partial approvals, keep approved amount as is
             rejected_amount = 0.0
             pending_amount = 0.0
             flagged_amount = 0.0
         else:
-            # Default to pending
             pending_amount = approved_amount
             approved_amount = 0.0
             rejected_amount = 0.0
@@ -237,7 +209,7 @@ class DatabaseResultsUpdater:
             'rejected_amount': rejected_amount,
             'pending_amount': pending_amount,
             'flagged_amount': flagged_amount,
-            'total_claimed': float(amounts.get('approved', 0.0)),  # Original claim amount
+            'total_claimed': float(amounts.get('approved', 0.0)),
             'gdrg_tariff': gdrg_tariff,
             'medicine_cost': medicine_cost,
             'investigation_cost': investigation_cost,
@@ -245,18 +217,6 @@ class DatabaseResultsUpdater:
         }
     
     def _determine_claim_and_processed_status(self, overall_result: str) -> tuple[str, str]:
-        """
-        ENHANCED: Determine both claim_status and processed_status from processing result
-        
-        Uses correct values from database constraints:
-        - claim_status: workflow stage (submitted, processing, processed, under_review, appealed)
-        - processed_status: decision (approved, partially_approved, rejected, flagged, pending, under_appeal)
-        
-        Returns:
-            tuple: (claim_status, processed_status)
-        """
-        
-        # Enhanced mapping for processed_status (the actual decision)
         processed_status_mapping = {
             'APPROVED': 'approved',
             'FINAL_APPROVED': 'approved',
@@ -268,13 +228,12 @@ class DatabaseResultsUpdater:
             'FLAGGED': 'flagged'
         }
         
-        # Enhanced mapping for claim_status (workflow stage)
         if overall_result in ['PENDING', 'FLAGGED']:
-            claim_status = 'under_review'      # Needs manual review
+            claim_status = 'under_review'
         elif overall_result in ['APPROVED', 'PARTIAL', 'REJECTED', 'DENIED', 'FINAL_APPROVED', 'FINAL_REJECTED']:
-            claim_status = 'processed'         # Processing complete
+            claim_status = 'processed'
         else:
-            claim_status = 'processing'        # Still in progress
+            claim_status = 'processing'
         
         processed_status = processed_status_mapping.get(overall_result, 'pending')
         
@@ -283,46 +242,30 @@ class DatabaseResultsUpdater:
         return claim_status, processed_status
     
     def _sanitize_text(self, text: str) -> str:
-        """
-        ENHANCED: Remove all emojis and special characters from text for database storage
-        
-        Args:
-            text: Input text that may contain emojis
-            
-        Returns:
-            str: Clean text safe for database storage
-        """
         if not text:
             return ""
         
-        # Comprehensive emoji removal pattern
         emoji_pattern = re.compile(
             "["
-            "\U0001F600-\U0001F64F"  # emoticons
-            "\U0001F300-\U0001F5FF"  # symbols & pictographs
-            "\U0001F680-\U0001F6FF"  # transport & map symbols
-            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
-            "\U00002702-\U000027B0"  # misc symbols
-            "\U000024C2-\U0001F251"  # enclosed characters
-            "\U0001F900-\U0001F9FF"  # supplemental symbols
-            "\U0001FA70-\U0001FAFF"  # symbols and pictographs extended-A
+            "\U0001F600-\U0001F64F"
+            "\U0001F300-\U0001F5FF"
+            "\U0001F680-\U0001F6FF"
+            "\U0001F1E0-\U0001F1FF"
+            "\U00002702-\U000027B0"
+            "\U000024C2-\U0001F251"
+            "\U0001F900-\U0001F9FF"
+            "\U0001FA70-\U0001FAFF"
             "]+", 
             flags=re.UNICODE
         )
         
-        # Remove emojis and clean up extra spaces
         clean_text = emoji_pattern.sub('', text)
         clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-        
-        # Remove any remaining special characters that might cause issues
         clean_text = re.sub(r'[^\w\s\-\.\,\:\;\(\)\/]', '', clean_text)
         
         return clean_text
     
     def _sanitize_dict_recursive(self, data: Union[Dict, List, str, Any]) -> Union[Dict, List, str, Any]:
-        """
-        ENHANCED: Recursively sanitize all string values in nested data structures
-        """
         if isinstance(data, dict):
             sanitized = {}
             for key, value in data.items():
@@ -337,10 +280,9 @@ class DatabaseResultsUpdater:
             return self._sanitize_text(data)
         
         else:
-            return data  # Return non-string values as-is
+            return data
     
     def _build_amount_breakdown_enhanced(self, financial_data: Dict, processing_outcome: ProcessingOutcome) -> Dict:
-        """Build comprehensive amount breakdown JSONB with enhanced validation"""
         breakdown = {
             "gdrg_tariff": financial_data['gdrg_tariff'],
             "medicine_cost": financial_data['medicine_cost'],
@@ -354,7 +296,6 @@ class DatabaseResultsUpdater:
             "last_updated": datetime.now().isoformat()
         }
         
-        # Add financial component multipliers if available
         components = financial_data.get('financial_components', {})
         if components:
             breakdown.update({
@@ -364,7 +305,6 @@ class DatabaseResultsUpdater:
                 "modifier_multiplier": float(components.get('modifier_multiplier', 1.0))
             })
         
-        # Add final decision context
         if processing_outcome.details:
             breakdown["final_decision"] = processing_outcome.details.get('final_decision', 'PROCESSING_COMPLETE')
         
@@ -372,7 +312,6 @@ class DatabaseResultsUpdater:
     
     def _build_validation_results_enhanced(self, processing_outcome: ProcessingOutcome, 
                                          overall_result: str, processing_stage: str) -> Dict:
-        """Build comprehensive validation results JSONB with enhanced details"""
         results = {
             "overall_result": overall_result,
             "processing_stage": processing_stage,
@@ -382,7 +321,6 @@ class DatabaseResultsUpdater:
             "encounter_id": processing_outcome.encounter_id
         }
         
-        # Add pipeline summary if available
         if processing_outcome.details:
             pipeline_summary = processing_outcome.details.get('pipeline_summary', {})
             if pipeline_summary:
@@ -394,13 +332,11 @@ class DatabaseResultsUpdater:
                     "pipeline_integrity": "COMPLETE" if pipeline_summary.get('stages_failed', 0) == 0 else "PARTIAL"
                 })
             
-            # Add encounter details
             results.update({
                 "encounter_type": processing_outcome.details.get('encounter_type'),
                 "routing_decision": processing_outcome.details.get('routing_decision')
             })
         
-        # Add validation chain as readable text
         if results.get('processing_path'):
             results["validation_chain"] = " -> ".join(results['processing_path'])
         
@@ -408,13 +344,11 @@ class DatabaseResultsUpdater:
     
     def _build_rejection_reasons_enhanced(self, processing_outcome: ProcessingOutcome, 
                                         overall_result: str, processing_stage: str) -> Optional[List[Dict]]:
-        """Build enhanced rejection reasons array if applicable"""
         if overall_result in ['APPROVED', 'FINAL_APPROVED']:
             return None
         
         rejection_reasons = []
         
-        # Primary rejection reason
         primary_reason = {
             "stage": processing_stage,
             "reason": self._sanitize_text(processing_outcome.reason),
@@ -423,14 +357,12 @@ class DatabaseResultsUpdater:
             "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage)
         }
         
-        # Add specific details based on stage
         details = self._extract_rejection_details_enhanced(processing_outcome, processing_stage)
         if details:
             primary_reason["details"] = details
         
         rejection_reasons.append(primary_reason)
         
-        # Add additional reasons from pipeline if available
         if processing_outcome.details:
             comprehensive_results = processing_outcome.details.get('comprehensive_results', {})
             for failed_stage in comprehensive_results.get('stages_failed', []):
@@ -447,7 +379,6 @@ class DatabaseResultsUpdater:
         return [self._sanitize_dict_recursive(reason) for reason in rejection_reasons]
     
     def _determine_rejection_severity(self, overall_result: str) -> str:
-        """Determine severity level of rejection"""
         if overall_result in ['REJECTED', 'DENIED', 'FINAL_REJECTED']:
             return "HIGH"
         elif overall_result == 'FLAGGED':
@@ -458,7 +389,6 @@ class DatabaseResultsUpdater:
             return "UNKNOWN"
     
     def _categorize_rejection_reason(self, reason: str, stage: str) -> str:
-        """Categorize rejection reason for better reporting"""
         reason_lower = reason.lower()
         
         if "medicine" in reason_lower or "oversupply" in reason_lower:
@@ -476,7 +406,6 @@ class DatabaseResultsUpdater:
     
     def _extract_rejection_details_enhanced(self, processing_outcome: ProcessingOutcome, 
                                           processing_stage: str) -> Dict:
-        """Extract enhanced rejection details with actionable recommendations"""
         details = {}
         reason = processing_outcome.reason.lower()
         
@@ -513,7 +442,6 @@ class DatabaseResultsUpdater:
     
     def _build_inference_rules_enhanced(self, processing_outcome: ProcessingOutcome, 
                                       financial_data: Dict) -> Dict:
-        """Build enhanced inference rules applied JSONB"""
         rules = {
             "expert_system_engine": "NHIS_Master_Orchestrator_v2.0_Enhanced",
             "pipeline_data_flow": "FIXED_ACCURATE_CALCULATIONS",
@@ -521,7 +449,6 @@ class DatabaseResultsUpdater:
             "validation_engine": "COMPREHENSIVE_MULTI_STAGE"
         }
         
-        # Add financial calculation rules
         components = financial_data.get('financial_components', {})
         if components:
             rules.update({
@@ -531,7 +458,6 @@ class DatabaseResultsUpdater:
                 "modifier_multiplier": float(components.get('modifier_multiplier', 1.0))
             })
         
-        # Add processing statistics
         if processing_outcome.details:
             pipeline_summary = processing_outcome.details.get('pipeline_summary', {})
             if pipeline_summary:
@@ -543,7 +469,6 @@ class DatabaseResultsUpdater:
                     "processing_time": f"{processing_outcome.processing_time_seconds:.3f}s"
                 }
             
-            # Add specific determination results
             comprehensive_results = processing_outcome.details.get('comprehensive_results', {})
             for stage_data in comprehensive_results.get('stages_passed', []):
                 if isinstance(stage_data, dict):
@@ -558,27 +483,21 @@ class DatabaseResultsUpdater:
         return self._sanitize_dict_recursive(rules)
     
     def _determine_review_required(self, overall_result: str, processing_outcome: ProcessingOutcome) -> bool:
-        """Enhanced logic to determine if manual review is required"""
-        # Always require review for non-approved outcomes
         if overall_result in ['REJECTED', 'DENIED', 'PENDING', 'FLAGGED', 'FINAL_REJECTED']:
             return True
         
-        # Require review for partial approvals
         if overall_result in ['PARTIAL']:
             return True
         
-        # Check for high-value claims
         if processing_outcome.details:
             amounts = processing_outcome.details.get('amounts', {})
             approved_amount = float(amounts.get('approved', 0))
-            if approved_amount > 1000:  # High-value threshold
+            if approved_amount > 1000:
                 return True
         
-        # Check for complex processing (many stages or long processing time)
         if processing_outcome.processing_time_seconds > 15.0:
             return True
         
-        # Check for any pipeline failures
         if processing_outcome.details:
             pipeline_summary = processing_outcome.details.get('pipeline_summary', {})
             if pipeline_summary.get('stages_failed', 0) > 0:
@@ -588,10 +507,8 @@ class DatabaseResultsUpdater:
     
     def _calculate_quality_score(self, overall_result: str, processing_time: float, 
                                 processing_outcome: ProcessingOutcome) -> float:
-        """Enhanced quality score calculation"""
         base_score = 0.0
         
-        # Result-based scoring (enhanced)
         if overall_result in ['APPROVED', 'FINAL_APPROVED']:
             base_score = 1.0
         elif overall_result == 'PARTIAL':
@@ -599,17 +516,15 @@ class DatabaseResultsUpdater:
         elif overall_result == 'FLAGGED':
             base_score = 0.5
         elif overall_result in ['REJECTED', 'DENIED', 'FINAL_REJECTED']:
-            base_score = 0.2  # Not 0 - still processed
-        else:  # PENDING
+            base_score = 0.2
+        else:
             base_score = 0.3
         
-        # Processing efficiency adjustments
         if processing_time < 5.0:
-            base_score += 0.1  # Fast processing bonus
+            base_score += 0.1
         elif processing_time > 20.0:
-            base_score -= 0.1  # Slow processing penalty
+            base_score -= 0.1
         
-        # Pipeline completion adjustments
         if processing_outcome.details:
             pipeline_summary = processing_outcome.details.get('pipeline_summary', {})
             stages_completed = pipeline_summary.get('total_stages', 0)
@@ -617,15 +532,13 @@ class DatabaseResultsUpdater:
             
             if stages_completed > 0:
                 completion_rate = (stages_completed - stages_failed) / stages_completed
-                base_score += (completion_rate - 0.5) * 0.2  # Bonus/penalty based on completion
+                base_score += (completion_rate - 0.5) * 0.2
         
-        # Data quality bonus
         if processing_outcome.details and processing_outcome.details.get('amounts'):
             amounts = processing_outcome.details['amounts']
             if all(isinstance(amounts.get(key, 0), (int, float)) for key in ['approved', 'gdrg_tariff', 'medicine_cost']):
-                base_score += 0.05  # Complete financial data bonus
+                base_score += 0.05
         
-        # Ensure score is between 0.0 and 1.0
         return max(0.0, min(1.0, base_score))
     
     async def _execute_database_update_enhanced(self, encounter_id: str, claim_status: str, processed_status: str,
@@ -633,19 +546,14 @@ class DatabaseResultsUpdater:
                                               validation_results: Dict, rejection_reasons: Optional[List],
                                               inference_rules: Dict, processing_time: float,
                                               review_required: bool, quality_score: float) -> bool:
-        """Enhanced database update execution with comprehensive error handling"""
         try:
-            # Pre-update validation
             if not await self._validate_before_update(encounter_id):
                 return False
             
-            # Log current state
             await self._log_current_state(encounter_id)
             
-            # Log update attempt
             logger.info(f"🎯 ATTEMPTING UPDATE: claim_status='{claim_status}', processed_status='{processed_status}', approved_amount={financial_data['approved_amount']}")
             
-            # Prepare update query
             update_query = """
             UPDATE claims_v3 SET
                 claim_status = $2,
@@ -670,22 +578,21 @@ class DatabaseResultsUpdater:
             WHERE encounter_id = $1
             """
             
-            # Execute update with detailed parameter logging
             parameters = [
-                encounter_id,                                           # $1
-                claim_status,                                          # $2
-                processed_status,                                      # $3
-                financial_data['total_claimed'],                       # $4
-                financial_data['approved_amount'],                     # $5
-                financial_data['rejected_amount'],                     # $6
-                financial_data['pending_amount'],                      # $7
-                financial_data['flagged_amount'],                      # $8
-                json.dumps(amount_breakdown),                          # $9
-                json.dumps(validation_results),                        # $10
-                json.dumps(rejection_reasons) if rejection_reasons else None,  # $11
-                json.dumps(inference_rules),                           # $12
-                review_required,                                       # $13
-                quality_score                                          # $14
+                encounter_id,
+                claim_status,
+                processed_status,
+                financial_data['total_claimed'],
+                financial_data['approved_amount'],
+                financial_data['rejected_amount'],
+                financial_data['pending_amount'],
+                financial_data['flagged_amount'],
+                json.dumps(amount_breakdown),
+                json.dumps(validation_results),
+                json.dumps(rejection_reasons) if rejection_reasons else None,
+                json.dumps(inference_rules),
+                review_required,
+                quality_score
             ]
             
             self._log_update_parameters(parameters)
@@ -694,7 +601,6 @@ class DatabaseResultsUpdater:
             
             logger.info(f"📊 UPDATE RESULT: {result}")
             
-            # Verify update success
             success = await self._verify_update_success(encounter_id, result)
             
             if success:
@@ -711,7 +617,6 @@ class DatabaseResultsUpdater:
             return False
     
     async def _validate_before_update(self, encounter_id: str) -> bool:
-        """Validate that the record exists before attempting update"""
         try:
             check_query = "SELECT encounter_id, claim_status, processed_status FROM claims_v3 WHERE encounter_id = $1"
             existing_record = await self.queries.db.fetch_one(check_query, encounter_id)
@@ -727,7 +632,6 @@ class DatabaseResultsUpdater:
             return False
     
     async def _log_current_state(self, encounter_id: str):
-        """Log current state of the record before update"""
         try:
             check_query = "SELECT encounter_id, claim_status, processed_status FROM claims_v3 WHERE encounter_id = $1"
             existing_record = await self.queries.db.fetch_one(check_query, encounter_id)
@@ -739,7 +643,6 @@ class DatabaseResultsUpdater:
             logger.warning(f"⚠️ Could not log current state for {encounter_id}: {e}")
     
     def _log_update_parameters(self, parameters: List):
-        """Log update parameters for debugging"""
         logger.info(f"🔧 EXECUTING UPDATE with parameters:")
         logger.info(f"   $1 (encounter_id): '{parameters[0]}'")
         logger.info(f"   $2 (claim_status): '{parameters[1]}'")
@@ -751,9 +654,7 @@ class DatabaseResultsUpdater:
         logger.info(f"   $8 (flagged_amount): {parameters[7]}")
     
     async def _verify_update_success(self, encounter_id: str, result: str) -> bool:
-        """Verify that the update was successful"""
         try:
-            # Check if update affected any rows
             if "UPDATE 1" in result:
                 return True
             elif "UPDATE 0" in result:
@@ -761,14 +662,13 @@ class DatabaseResultsUpdater:
                 return False
             else:
                 logger.warning(f"⚠️ UNEXPECTED UPDATE RESULT for {encounter_id}: {result}")
-                return "UPDATE" in result  # Assume success if UPDATE is mentioned
+                return "UPDATE" in result
                 
         except Exception as e:
             logger.error(f"❌ Could not verify update success for {encounter_id}: {e}")
             return False
     
     async def _log_post_update_state(self, encounter_id: str):
-        """Log state after update for verification"""
         try:
             check_query = "SELECT encounter_id, claim_status, processed_status FROM claims_v3 WHERE encounter_id = $1"
             after_record = await self.queries.db.fetch_one(check_query, encounter_id)
@@ -780,15 +680,6 @@ class DatabaseResultsUpdater:
             logger.warning(f"⚠️ Could not log post-update state for {encounter_id}: {e}")
     
     async def update_multiple_claims(self, processing_results: Dict[str, ProcessingOutcome]) -> Dict[str, bool]:
-        """
-        BATCH UPDATE: Update multiple claims with enhanced error handling and rollback support
-        
-        Args:
-            processing_results: Dict mapping encounter_id to ProcessingOutcome
-            
-        Returns:
-            Dict mapping encounter_id to update success status
-        """
         if not self.is_initialized:
             await self.initialize()
         
@@ -816,14 +707,12 @@ class DatabaseResultsUpdater:
                 results[encounter_id] = False
                 logger.error(f"❌ [{failed_updates}/{len(processing_results)}] {encounter_id}: EXCEPTION - {e}")
         
-        # Log batch summary
         success_rate = (successful_updates / len(processing_results)) * 100 if processing_results else 0
         logger.info(f"📊 BATCH UPDATE COMPLETE: {successful_updates}/{len(processing_results)} successful ({success_rate:.1f}%)")
         
         return results
     
     async def get_update_statistics(self) -> Dict[str, Any]:
-        """Get comprehensive update statistics"""
         return {
             "session_stats": self.update_stats.copy(),
             "database_connection": "active" if self.is_initialized else "inactive",
@@ -833,15 +722,6 @@ class DatabaseResultsUpdater:
         }
     
     async def verify_claim_update(self, encounter_id: str) -> Optional[Dict]:
-        """
-        Verify that a claim was properly updated in the database
-        
-        Args:
-            encounter_id: The claim encounter ID to verify
-            
-        Returns:
-            Dict with claim status information or None if not found
-        """
         if not self.is_initialized:
             await self.initialize()
         
@@ -876,18 +756,7 @@ class DatabaseResultsUpdater:
             return None
 
 
-# Convenience Functions for Easy Integration
-
 async def update_single_claim_result(processing_outcome: ProcessingOutcome) -> bool:
-    """
-    Convenience function to update a single claim result
-    
-    Args:
-        processing_outcome: ProcessingOutcome from master orchestrator
-        
-    Returns:
-        bool: True if update successful
-    """
     updater = DatabaseResultsUpdater()
     try:
         await updater.initialize()
@@ -896,15 +765,6 @@ async def update_single_claim_result(processing_outcome: ProcessingOutcome) -> b
         await updater.close()
 
 async def update_batch_claim_results(processing_results: Dict[str, ProcessingOutcome]) -> Dict[str, bool]:
-    """
-    Convenience function to update batch claim results
-    
-    Args:
-        processing_results: Dict mapping encounter_id to ProcessingOutcome
-        
-    Returns:
-        Dict mapping encounter_id to update success status
-    """
     updater = DatabaseResultsUpdater()
     try:
         await updater.initialize()
@@ -913,15 +773,6 @@ async def update_batch_claim_results(processing_results: Dict[str, ProcessingOut
         await updater.close()
 
 async def verify_claim_status(encounter_id: str) -> Optional[Dict]:
-    """
-    Convenience function to verify a claim's status in the database
-    
-    Args:
-        encounter_id: The claim encounter ID to check
-        
-    Returns:
-        Dict with claim information or None if not found
-    """
     updater = DatabaseResultsUpdater()
     try:
         await updater.initialize()
@@ -930,12 +781,6 @@ async def verify_claim_status(encounter_id: str) -> Optional[Dict]:
         await updater.close()
 
 async def get_database_update_stats() -> Dict[str, Any]:
-    """
-    Get database update statistics
-    
-    Returns:
-        Dict with update statistics
-    """
     updater = DatabaseResultsUpdater()
     try:
         await updater.initialize()
@@ -943,13 +788,7 @@ async def get_database_update_stats() -> Dict[str, Any]:
     finally:
         await updater.close()
 
-
-# Testing and Demonstration
-
 async def test_enhanced_database_updater():
-    """
-    Comprehensive test of the enhanced database results updater
-    """
     print("\n" + "="*80)
     print("🧪 TESTING ENHANCED DATABASE RESULTS UPDATER")
     print("="*80)
@@ -980,9 +819,9 @@ async def test_enhanced_database_updater():
         
         print(f"\n🧼 EMOJI SANITIZATION TEST:")
         test_texts = [
-            "🎯 FINAL_APPROVED with 💰 360.24 GHS",
-            "❌ Medicine validation failed 💊",
-            "✅ Stage 1 passed: Ready for encounter flow"
+            "🎯 FINAL_APPROVED with  360.24 GHS",
+            "❌ Medicine validation failed ",
+            " Stage 1 passed: Ready for encounter flow"
         ]
         
         for text in test_texts:
@@ -992,7 +831,6 @@ async def test_enhanced_database_updater():
             print()
         
         print(f"📊 QUALITY SCORING TEST:")
-        # Simulate different scenarios for quality scoring
         test_scenarios = [
             ("APPROVED", 5.0, "Fast approved claim"),
             ("REJECTED", 10.0, "Standard rejected claim"),
@@ -1001,7 +839,6 @@ async def test_enhanced_database_updater():
         ]
         
         for result, time_sec, description in test_scenarios:
-            # Create mock processing outcome for testing
             from shared_types import ProcessingOutcome, ValidationResult, ProcessingStage
             
             mock_outcome = ProcessingOutcome(
@@ -1042,9 +879,6 @@ async def test_enhanced_database_updater():
         await updater.close()
 
 async def main():
-    """
-    Main function to run tests and demonstrations
-    """
     await test_enhanced_database_updater()
 
 if __name__ == "__main__":

@@ -752,7 +752,7 @@ class InitialProcessingValidator:
                 results[encounter_id] = result
                 
                 # Enhanced logging
-                status_emoji = "✅" if result.result == ValidationResult.APPROVED else "❌"
+                status_emoji = "" if result.result == ValidationResult.APPROVED else "❌"
                 flow_type = ""
                 gdrg_info = ""
                 specialty_info = ""
@@ -1015,12 +1015,12 @@ async def main():
                 print(f"  Steps Failed: {len(step_results['steps_failed'])}")
                 
                 if step_results['steps_passed']:
-                    print(f"\n  ✅ PASSED STEPS:")
+                    print(f"\n   PASSED STEPS:")
                     for step in step_results['steps_passed']:
                         print(f"    {step['step']}: {step['message']}")
                 
                 if step_results['steps_failed']:
-                    print(f"\n  ❌ FAILED STEPS:")
+                    print(f"\n   FAILED STEPS:")
                     for step in step_results['steps_failed']:
                         print(f"    {step['step']}: {step['message']}")
             

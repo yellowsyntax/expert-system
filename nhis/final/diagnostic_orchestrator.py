@@ -125,7 +125,7 @@ class DiagnosticOrchestrator:
                             print(f"  {key}: {value}")
                 
                 # Test the success check
-                print(f"\n✅ SUCCESS CHECK TESTS:")
+                print(f"\n SUCCESS CHECK TESTS:")
                 success_states = [ValidationResult.APPROVED, ValidationResult.FLAGGED, ValidationResult.PARTIAL]
                 is_successful = result.result in success_states
                 print(f"  result.result in success_states: {is_successful}")
@@ -150,22 +150,22 @@ class DiagnosticOrchestrator:
                 print(f"\n🧪 TESTING ORCHESTRATOR LOGIC:")
                 
                 if result.result == ValidationResult.APPROVED:
-                    print(f"  ✅ Stage 1 should PASS - result is APPROVED")
+                    print(f"   Stage 1 should PASS - result is APPROVED")
                     
                     if encounter_type:
-                        print(f"  ✅ Encounter type found: {encounter_type}")
-                        print(f"  ✅ Should proceed to Stage 2: {encounter_type} Flow")
+                        print(f"   Encounter type found: {encounter_type}")
+                        print(f"   Should proceed to Stage 2: {encounter_type} Flow")
                     else:
-                        print(f"  ❌ Missing encounter_type - this would cause failure")
+                        print(f"   Missing encounter_type - this would cause failure")
                         
                 else:
-                    print(f"  ❌ Stage 1 should FAIL - result is {result.result.value}")
+                    print(f"   Stage 1 should FAIL - result is {result.result.value}")
             else:
-                print(f"  ❌ Result object has no 'result' attribute")
+                print(f"   Result object has no 'result' attribute")
                 print(f"  Available attributes: {dir(result)}")
             
         except Exception as e:
-            print(f"\n❌ DIAGNOSTIC ERROR: {e}")
+            print(f"\n DIAGNOSTIC ERROR: {e}")
             import traceback
             traceback.print_exc()
 
