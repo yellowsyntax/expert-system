@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/v2/batch-monitor", tags=["Batch Processing Monitor"])
 
-# Custom JSON encoder for datetime objects
+
 def json_serializer(obj):
     """JSON serializer function that handles datetime objects"""
     if isinstance(obj, datetime):
@@ -360,7 +360,6 @@ async def get_batch_progress(batch_id: str, queries) -> BatchProgressUpdate:
     )
 
 async def get_all_active_batches(queries) -> List[Dict[str, Any]]:
-    # FIXED QUERY - moved aggregate function from WHERE to HAVING clause
     query = """
     SELECT 
         batch_id,
@@ -372,8 +371,23 @@ async def get_all_active_batches(queries) -> List[Dict[str, Any]]:
         COUNT(CASE WHEN claim_status = 'submitted' THEN 1 END) as pending_claims,
         MIN(processing_started_at) as started_at,
         MAX(processing_completed_at) as completed_at,
-        MAX(updated_at) as last_updated
-    FROM claims_v3 
+        MAX(updated_at) as last_updated,
+        CASE 
+            WHEN COUNT(CASE WHEN claim_status = 'submitted' THEN 1 END) > 0 
+                 AND COUNT(CASE WHEN processing_started_at IS NOT NULL THEN 1 END) > 0 
+                 THEN 'Processing'
+            WHEN COUNT(CASE WHEN claim_status = 'submitted' THEN 1 END) > 0 
+                 AND COUNT(CASE WHEN processing_started_at IS NOT NULL THEN 1 END) = 0 
+                 THEN 'Submitted'
+            WHEN COUNT(CASE WHEN claim_status = 'processed' THEN 1 END) = COUNT(*) 
+                 AND COUNT(CASE WHEN processed_status IN ('flagged', 'rejected') THEN 1 END) > 0 
+                 THEN 'Under review'
+            WHEN COUNT(CASE WHEN claim_status = 'processed' THEN 1 END) = COUNT(*) 
+                 THEN 'Completed'
+            ELSE 'Processing'
+        END as processing_status,
+        MAX(provider_name) as provider_name
+    FROM claims_v3
     WHERE batch_id IS NOT NULL 
     GROUP BY batch_id
     HAVING (
@@ -389,23 +403,19 @@ async def get_all_active_batches(queries) -> List[Dict[str, Any]]:
     
     for row in result:
         percentage = (row['processed_claims'] / row['total_claims'] * 100) if row['total_claims'] > 0 else 0
-        
-        if row['processed_claims'] == row['total_claims']:
-            status = "completed"
-        elif row['processed_claims'] > 0:
-            status = "processing"
-        else:
-            status = "pending"
-        
+
         batches.append({
             "batch_id": row['batch_id'],
+            "provider_name": row['provider_name'] or 'Unknown Provider',
+            "processing_status": row['processing_status'],
             "total_claims": row['total_claims'],
             "processed_claims": row['processed_claims'],
             "approved_claims": row['approved_claims'],
             "rejected_claims": row['rejected_claims'],
             "flagged_claims": row['flagged_claims'],
-            "percentage_complete": round(percentage, 2),
-            "status": status,
+            "pending_claims": row['pending_claims'],
+            "percentage_complete": round(percentage, 1),
+            "status": row['processing_status'].lower().replace(' ', '_'),
             "started_at": row['started_at'],
             "completed_at": row['completed_at'],
             "last_updated": row['last_updated']
@@ -449,12 +459,11 @@ async def trigger_websocket_update(payload: dict):
         encounter_id = payload.get("encounter_id")
         batch_id = payload.get("batch_id")
         status = payload.get("status")
-        processed_status = payload.get("processed_status")  # approved, rejected, flagged
+        processed_status = payload.get("processed_status")
         
         logger.info(f"🔄 Manual trigger received for {encounter_id} (batch: {batch_id}, status: {status})")
         
         if batch_id:
-            # Send individual claim update
             claim_update = ClaimProgressUpdate(
                 encounter_id=encounter_id,
                 batch_id=batch_id,
@@ -466,7 +475,6 @@ async def trigger_websocket_update(payload: dict):
             )
             await broadcast_claim_processed(claim_update)
             
-            # Send batch progress update with fresh data
             queries = await get_nhis_queries()
             await broadcast_batch_progress_update(batch_id, queries)
             
@@ -490,7 +498,6 @@ async def monitor_all_batches_task():
             queries = await get_nhis_queries()
             active_batches = await get_all_active_batches(queries)
             
-            # Only broadcast if there are active connections
             if manager.active_connections:
                 await manager.broadcast_to_all({
                     "type": "all_batches_update",
@@ -498,10 +505,10 @@ async def monitor_all_batches_task():
                 })
                 logger.debug(f"Broadcasted update to {len(manager.active_connections)} connections")
             
-            await asyncio.sleep(10)  # Update every 10 seconds
+            await asyncio.sleep(10)
             
         except Exception as e:
             logger.error(f"Error in batch monitoring task: {e}")
-            await asyncio.sleep(30)  # Wait longer on error
+            await asyncio.sleep(30)
             
     logger.info("Batch monitoring task stopped")

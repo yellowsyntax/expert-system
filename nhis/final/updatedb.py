@@ -224,12 +224,12 @@ class DatabaseResultsUpdater:
             'REJECTED': 'rejected',
             'DENIED': 'rejected',
             'FINAL_REJECTED': 'rejected',
-            'PENDING': 'pending',
+            'PENDING': 'flagged',
             'FLAGGED': 'flagged'
         }
         
         if overall_result in ['PENDING', 'FLAGGED']:
-            claim_status = 'under_review'
+            claim_status = 'processed'
         elif overall_result in ['APPROVED', 'PARTIAL', 'REJECTED', 'DENIED', 'FINAL_APPROVED', 'FINAL_REJECTED']:
             claim_status = 'processed'
         else:

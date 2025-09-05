@@ -1,480 +1,182 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>NHIS Batch Monitor</title>
+    <title>Batch Monitor</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
         body {
-            font-family: system-ui, -apple-system, sans-serif;
-            background: #f5f7fa;
-            padding: 20px;
-            line-height: 1.6;
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f0f0f0;
         }
-
         .container {
-            max-width: 1200px;
-            margin: 0 auto;
             background: white;
-            border-radius: 12px;
-            padding: 30px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-        }
-
-        h1 {
-            color: #2d3748;
-            margin-bottom: 20px;
-            text-align: center;
-        }
-
-        .connection-status {
-            display: inline-block;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 20px;
-        }
-
-        .connected {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-
-        .disconnected {
-            background: #fed7d7;
-            color: #742a2a;
-        }
-
-        .connecting {
-            background: #ffd6cc;
-            color: #c05621;
-        }
-
-        .controls {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 30px;
-            align-items: center;
-        }
-
-        button {
-            padding: 10px 20px;
-            background: #4299e1;
-            color: white;
-            border: none;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 500;
-        }
-
-        button:hover {
-            background: #3182ce;
-        }
-
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        .stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 20px;
-            margin-bottom: 30px;
-        }
-
-        .stat-card {
-            background: #f7fafc;
             padding: 20px;
-            border-radius: 8px;
-            text-align: center;
+            border-radius: 5px;
         }
-
-        .stat-card h3 {
-            font-size: 14px;
-            color: #718096;
-            margin-bottom: 8px;
-            text-transform: uppercase;
+        .status {
+            padding: 5px 10px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-bottom: 10px;
         }
-
-        .stat-card .value {
-            font-size: 24px;
-            font-weight: bold;
-            color: #2d3748;
+        .connected { background: #d4edda; color: #155724; }
+        .disconnected { background: #f8d7da; color: #721c24; }
+        
+        button {
+            padding: 8px 15px;
+            margin: 5px;
+            border: 1px solid #ccc;
+            background: #fff;
+            cursor: pointer;
         }
-
-        .batch-list {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
+        button:hover { background: #f0f0f0; }
+        
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 20px 0;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th { background: #f5f5f5; }
+        
+        .progress {
+            width: 100px;
+            height: 10px;
+            background: #eee;
+            border-radius: 5px;
             overflow: hidden;
         }
-
-        .batch-header {
-            background: #f7fafc;
-            padding: 15px 20px;
-            font-weight: 600;
-            color: #2d3748;
-            display: grid;
-            grid-template-columns: 150px 1fr 100px 100px 120px;
-            gap: 15px;
-        }
-
-        .batch-row {
-            padding: 15px 20px;
-            border-bottom: 1px solid #e2e8f0;
-            display: grid;
-            grid-template-columns: 150px 1fr 100px 100px 120px;
-            gap: 15px;
-            align-items: center;
-        }
-
-        .batch-row:last-child {
-            border-bottom: none;
-        }
-
-        .batch-row:hover {
-            background: #f7fafc;
-        }
-
         .progress-bar {
-            background: #e2e8f0;
-            height: 8px;
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            background: linear-gradient(90deg, #48bb78, #38a169);
             height: 100%;
-            transition: width 0.5s ease;
+            background: #007bff;
+            transition: width 0.3s;
         }
-
-        .status-badge {
-            padding: 4px 8px;
-            border-radius: 12px;
-            font-size: 12px;
-            font-weight: 500;
-            text-align: center;
-        }
-
-        .status-completed {
-            background: #c6f6d5;
-            color: #22543d;
-        }
-
-        .status-processing {
-            background: #bee3f8;
-            color: #2a4365;
-        }
-
-        .status-pending {
-            background: #ffd6cc;
-            color: #c05621;
-        }
-
+        
         .log {
-            margin-top: 20px;
-            background: #1a202c;
-            color: #e2e8f0;
-            padding: 15px;
-            border-radius: 8px;
-            height: 200px;
-            overflow-y: auto;
+            background: #000;
+            color: #0f0;
+            padding: 10px;
             font-family: monospace;
-            font-size: 12px;
+            height: 150px;
+            overflow-y: auto;
+            margin-top: 20px;
         }
-
-        .log-entry {
-            margin-bottom: 5px;
-            padding: 2px 0;
-        }
-
-        .log-entry.info { color: #90cdf4; }
-        .log-entry.success { color: #68d391; }
-        .log-entry.error { color: #fc8181; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>NHIS Batch Processing Monitor</h1>
+        <h2>Batch Processing Monitor</h2>
         
-        <div class="connection-status disconnected" id="status">Disconnected</div>
+        <div class="status disconnected" id="status">Disconnected</div>
         
-        <div class="controls">
-            <button onclick="connect()" id="connectBtn">Connect</button>
-            <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
-            <span id="lastUpdate">Never updated</span>
-        </div>
-
-        <div class="stats">
-            <div class="stat-card">
-                <h3>Active Batches</h3>
-                <div class="value" id="activeBatches">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Total Claims</h3>
-                <div class="value" id="totalClaims">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Processed</h3>
-                <div class="value" id="processedClaims">0</div>
-            </div>
-            <div class="stat-card">
-                <h3>Pending</h3>
-                <div class="value" id="pendingClaims">0</div>
-            </div>
-        </div>
-
-        <div class="batch-list">
-            <div class="batch-header">
-                <div>Batch ID</div>
-                <div>Progress</div>
-                <div>Status</div>
-                <div>Claims</div>
-                <div>Last Updated</div>
-            </div>
-            <div id="batchRows">
-                <div style="padding: 40px; text-align: center; color: #a0aec0;">
-                    Click Connect to view batches
-                </div>
-            </div>
-        </div>
-
+        <button onclick="connect()">Connect</button>
+        <button onclick="disconnect()">Disconnect</button>
+        
+        <table>
+            <thead>
+                <tr>
+                    <th>Batch ID</th>
+                    <th>Provider Name</th>
+                    <th>Processing Status</th>
+                    <th>Progress</th>
+                    <th>Total Claims</th>
+                    <th>Processed</th>
+                    <th>Flagged</th>
+                    <th>Rejected</th>
+                </tr>
+            </thead>
+            <tbody id="batches">
+                <tr><td colspan="8">testin testing testing testing chale</td></tr>
+            </tbody>
+        </table>
+        
         <div class="log" id="log"></div>
     </div>
 
     <script>
-        class BatchMonitor {
-            constructor() {
-                this.ws = null;
-                this.reconnectAttempts = 0;
-                this.maxReconnects = 5;
-                this.reconnectDelay = 2000;
-                this.heartbeatInterval = null;
-                this.logs = [];
-            }
+        let ws = null;
+        let logs = [];
 
-            connect() {
-                if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                    this.log('Already connected', 'info');
-                    return;
-                }
-
-                this.updateStatus('connecting');
-                this.updateButtons(false, true);
-                
-                try {
-                    this.ws = new WebSocket('ws://localhost:8000/v2/batch-monitor/ws/all-batches');
-                    
-                    this.ws.onopen = () => {
-                        this.log('Connected successfully', 'success');
-                        this.updateStatus('connected');
-                        this.updateButtons(true, false);
-                        this.reconnectAttempts = 0;
-                        this.startHeartbeat();
-                    };
-
-                    this.ws.onmessage = (event) => {
-                        const data = JSON.parse(event.data);
-                        this.handleMessage(data);
-                    };
-
-                    this.ws.onclose = (event) => {
-                        this.log(`Connection closed (${event.code})`, 'error');
-                        this.updateStatus('disconnected');
-                        this.updateButtons(false, true);
-                        this.stopHeartbeat();
-                        
-                        if (event.code !== 1000 && this.reconnectAttempts < this.maxReconnects) {
-                            this.scheduleReconnect();
-                        }
-                    };
-
-                    this.ws.onerror = () => {
-                        this.log('Connection error', 'error');
-                    };
-
-                } catch (error) {
-                    this.log(`Connection failed: ${error.message}`, 'error');
-                    this.updateStatus('disconnected');
-                    this.updateButtons(false, true);
-                }
-            }
-
-            disconnect() {
-                if (this.ws) {
-                    this.ws.close(1000, 'User disconnect');
-                    this.ws = null;
-                }
-                this.stopHeartbeat();
-                this.reconnectAttempts = this.maxReconnects; // Prevent auto-reconnect
-                this.updateStatus('disconnected');
-                this.updateButtons(false, true);
-                this.log('Disconnected', 'info');
-            }
-
-            scheduleReconnect() {
-                this.reconnectAttempts++;
-                const delay = this.reconnectDelay * this.reconnectAttempts;
-                
-                this.log(`Reconnecting in ${delay/1000}s (attempt ${this.reconnectAttempts})`, 'info');
-                
-                setTimeout(() => {
-                    if (this.reconnectAttempts <= this.maxReconnects) {
-                        this.connect();
-                    }
-                }, delay);
-            }
-
-            startHeartbeat() {
-                this.heartbeatInterval = setInterval(() => {
-                    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                        this.ws.send(JSON.stringify({ type: 'ping' }));
-                    }
-                }, 30000);
-            }
-
-            stopHeartbeat() {
-                if (this.heartbeatInterval) {
-                    clearInterval(this.heartbeatInterval);
-                    this.heartbeatInterval = null;
-                }
-            }
-
-            handleMessage(data) {
-                switch (data.type) {
-                    case 'all_batches_status':
-                        this.log('Received initial batch data', 'success');
-                        this.updateBatches(data.data);
-                        break;
-                        
-                    case 'all_batches_update':
-                        this.log('Batch data updated', 'info');
-                        this.updateBatches(data.data);
-                        break;
-                        
-                    case 'heartbeat':
-                        // Silent heartbeat
-                        break;
-                        
-                    case 'pong':
-                        // Silent pong response
-                        break;
-                        
-                    default:
-                        this.log(`Unknown message: ${data.type}`, 'info');
-                }
-                
-                this.updateLastUpdate();
-            }
-
-            updateBatches(batches) {
-                // Update stats
-                document.getElementById('activeBatches').textContent = batches.length;
-                
-                const totalClaims = batches.reduce((sum, b) => sum + b.total_claims, 0);
-                const processedClaims = batches.reduce((sum, b) => sum + b.processed_claims, 0);
-                const pendingClaims = totalClaims - processedClaims;
-                
-                document.getElementById('totalClaims').textContent = totalClaims;
-                document.getElementById('processedClaims').textContent = processedClaims;
-                document.getElementById('pendingClaims').textContent = pendingClaims;
-
-                // Update batch list
-                const container = document.getElementById('batchRows');
-                
-                if (batches.length === 0) {
-                    container.innerHTML = '<div style="padding: 40px; text-align: center; color: #a0aec0;">No active batches</div>';
-                    return;
-                }
-
-                container.innerHTML = batches.map(batch => {
-                    const percentage = batch.percentage_complete || 0;
-                    const lastUpdate = batch.last_updated ? 
-                        new Date(batch.last_updated).toLocaleTimeString() : 'Never';
-
-                    return `
-                        <div class="batch-row">
-                            <div><strong>${batch.batch_id}</strong></div>
-                            <div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" style="width: ${percentage}%"></div>
-                                </div>
-                                <small>${percentage.toFixed(1)}%</small>
-                            </div>
-                            <div>
-                                <span class="status-badge status-${batch.status}">${batch.status}</span>
-                            </div>
-                            <div>${batch.processed_claims}/${batch.total_claims}</div>
-                            <div><small>${lastUpdate}</small></div>
-                        </div>
-                    `;
-                }).join('');
-            }
-
-            updateStatus(status) {
-                const element = document.getElementById('status');
-                element.className = `connection-status ${status}`;
-                element.textContent = status.charAt(0).toUpperCase() + status.slice(1);
-            }
-
-            updateButtons(connected, disconnected) {
-                document.getElementById('connectBtn').disabled = !connected;
-                document.getElementById('disconnectBtn').disabled = !disconnected;
-            }
-
-            updateLastUpdate() {
-                document.getElementById('lastUpdate').textContent = 
-                    `Last updated: ${new Date().toLocaleTimeString()}`;
-            }
-
-            log(message, type = 'info') {
-                const timestamp = new Date().toLocaleTimeString();
-                const entry = `[${timestamp}] ${message}`;
-                
-                this.logs.unshift({ message: entry, type });
-                if (this.logs.length > 50) this.logs.pop();
-                
-                const container = document.getElementById('log');
-                container.innerHTML = this.logs
-                    .map(log => `<div class="log-entry ${log.type}">${log.message}</div>`)
-                    .join('');
-                
-                container.scrollTop = 0;
-            }
-        }
-
-        // Global instance
-        const monitor = new BatchMonitor();
-
-        // Global functions for buttons
         function connect() {
-            monitor.connect();
+            if (ws) return;
+            
+            ws = new WebSocket('ws://13.217.48.101:8000/v2/batch-monitor/ws/all-batches');
+            
+            ws.onopen = () => {
+                updateStatus('Connected', 'connected');
+                log('Connected to server');
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                if (data.type === 'all_batches_status' || data.type === 'all_batches_update') {
+                    updateBatches(data.data);
+                    log('Batch data received');
+                }
+            };
+            
+            ws.onclose = () => {
+                updateStatus('Disconnected', 'disconnected');
+                log('Connection closed');
+                ws = null;
+            };
+            
+            ws.onerror = () => {
+                log('Connection error');
+            };
         }
 
         function disconnect() {
-            monitor.disconnect();
+            if (ws) {
+                ws.close();
+                ws = null;
+            }
         }
 
-        // Auto-connect on page load
-        window.addEventListener('load', () => {
-            monitor.log('Batch Monitor initialized', 'info');
-            // Uncomment to auto-connect:
-            // monitor.connect();
-        });
+        function updateStatus(text, className) {
+            const status = document.getElementById('status');
+            status.textContent = text;
+            status.className = 'status ' + className;
+        }
 
-        // Clean disconnect on page unload
-        window.addEventListener('beforeunload', () => {
-            monitor.disconnect();
-        });
+        function updateBatches(batches) {
+            const tbody = document.getElementById('batches');
+            
+            if (batches.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="8">No active batches</td></tr>';
+                return;
+            }
+            
+            tbody.innerHTML = batches.map(batch => `
+                <tr>
+                    <td>${batch.batch_id}</td>
+                    <td>${batch.provider_name || 'Unknown'}</td>
+                    <td>${batch.processing_status || batch.status}</td>
+                    <td>
+                        <div class="progress">
+                            <div class="progress-bar" style="width: ${batch.percentage_complete}%"></div>
+                        </div>
+                        ${batch.percentage_complete.toFixed(1)}%
+                    </td>
+                    <td>${batch.total_claims}</td>
+                    <td>${batch.processed_claims}</td>
+                    <td>${batch.flagged_claims}</td>
+                    <td>${batch.rejected_claims}</td>
+                </tr>
+            `).join('');
+        }
+
+        function log(message) {
+            const time = new Date().toLocaleTimeString();
+            logs.unshift(`[${time}] ${message}`);
+            if (logs.length > 20) logs.pop();
+            
+            document.getElementById('log').innerHTML = logs.join('<br>');
+        }
     </script>
 </body>
 </html>

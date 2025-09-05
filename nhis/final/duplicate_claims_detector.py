@@ -890,7 +890,7 @@ class DuplicateClaimsDetector:
             # Convert to JSON string for storage
             flag_reason_json = json.dumps(flag_reason_structure, default=str)
             
-            # Update the claims_v3 table with enhanced JSON flag reason
+            
             update_query = """
             UPDATE claims_v3 
             SET 
@@ -898,6 +898,7 @@ class DuplicateClaimsDetector:
                 claim_status = 'processed',
                 flag_reason = $2,
                 flagged_at = CURRENT_TIMESTAMP,
+                processed_by = 'NHIS_EXPERT_SYSTEM',
                 duplicate_count = $3,
                 highest_duplicate_confidence = $4
             WHERE encounter_id = $1
