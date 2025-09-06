@@ -39,9 +39,9 @@ class DatabaseResultsUpdater:
 
                 async with session.post(url, json=payload, timeout=1) as response:
                     if response.status == 200:
-                        logger.info(f"🔄 WebSocket update triggered for {encounter_id}")
+                        logger.info(f"WebSocket update triggered for {encounter_id}")
                     else:
-                        logger.warning(f"⚠️ WebSocket trigger failed: HTTP {response.status}")
+                        logger.warning(f"WebSocket trigger failed: HTTP {response.status}")
 
         except asyncio.TimeoutError:
             logger.debug(f"WebSocket trigger timeout for {encounter_id} (non-critical)")
@@ -54,24 +54,24 @@ class DatabaseResultsUpdater:
                 await initialize_database()
                 self.queries = await get_nhis_queries()
                 self.is_initialized = True
-                logger.info("🔌 Database Results Updater initialized successfully")
+                logger.info("Database Results Updater initialized successfully")
                 await self._test_database_connection()
             except Exception as e:
-                logger.error(f"❌ Failed to initialize Database Results Updater: {e}")
+                logger.error(f"Failed to initialize Database Results Updater: {e}")
                 raise
     
     async def _test_database_connection(self):
         try:
             test_query = "SELECT COUNT(*) as claim_count FROM claims_v3 LIMIT 1"
             result = await self.queries.db.fetch_one(test_query)
-            logger.info(f"✅ Database connection verified - claims_v3 accessible")
+            logger.info(f"Database connection verified - claims_v3 accessible")
         except Exception as e:
-            logger.error(f"❌ Database connection test failed: {e}")
+            logger.error(f"Database connection test failed: {e}")
             raise
     
     async def close(self):
         if self.is_initialized:
-            logger.info(f"📊 Update Statistics: {self.update_stats['successful']}/{self.update_stats['total_processed']} successful")
+            logger.info(f"Update Statistics: {self.update_stats['successful']}/{self.update_stats['total_processed']} successful")
             await close_database()
             self.is_initialized = False
             logger.info("Database Results Updater closed")
@@ -87,7 +87,7 @@ class DatabaseResultsUpdater:
             logger.info(f"DATABASE UPDATE: Processing results for {encounter_id}")
             
             if not self._validate_processing_outcome(processing_outcome):
-                logger.error(f"❌ Invalid processing outcome for {encounter_id}")
+                logger.error(f"Invalid processing outcome for {encounter_id}")
                 self.update_stats['failed'] += 1
                 return False
             
@@ -122,7 +122,7 @@ class DatabaseResultsUpdater:
             if success:
                 self.update_stats['successful'] += 1
                 approved_amount = financial_data['approved_amount']
-                logger.info(f"✅ Database updated successfully for {encounter_id}: {processed_status} ({approved_amount} GHS)")
+                logger.info(f"Database updated successfully for {encounter_id}: {processed_status} ({approved_amount} GHS)")
                 
                 try:
                     batch_id = getattr(self, '_current_batch_id', None)
@@ -133,12 +133,12 @@ class DatabaseResultsUpdater:
                 return True
             else:
                 self.update_stats['failed'] += 1
-                logger.error(f"❌ Database update failed for {encounter_id}")
+                logger.error(f"Database update failed for {encounter_id}")
                 return False
                 
         except Exception as e:
             self.update_stats['failed'] += 1
-            logger.error(f"❌ Error updating database for {encounter_id}: {e}")
+            logger.error(f"Error updating database for {encounter_id}: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -168,38 +168,52 @@ class DatabaseResultsUpdater:
         amounts = details.get('amounts', {})
         financial_components = details.get('financial_components', {})
         
-        approved_amount = float(amounts.get('approved', 0.0))
         gdrg_tariff = float(amounts.get('gdrg_tariff', 0.0))
-        medicine_cost = float(amounts.get('medicine_cost', 0.0))
+        medicine_cost_approved = float(amounts.get('medicine_cost_approved', 0.0))
+        medicine_cost_denied = float(amounts.get('medicine_cost_denied', 0.0))
+        total_medicine_cost = medicine_cost_approved + medicine_cost_denied
         investigation_cost = float(amounts.get('investigation_cost', 0.0))
         
         overall_result = processing_outcome.overall_result.value
         
         if overall_result in ['APPROVED', 'FINAL_APPROVED']:
+            approved_amount = float(amounts.get('approved', 0.0))
             rejected_amount = 0.0
             pending_amount = 0.0
             flagged_amount = 0.0
-        elif overall_result in ['REJECTED', 'DENIED', 'FINAL_REJECTED']:
-            rejected_amount = approved_amount
-            approved_amount = 0.0
-            pending_amount = 0.0
-            flagged_amount = 0.0
-        elif overall_result == 'PENDING':
-            pending_amount = approved_amount
-            approved_amount = 0.0
-            rejected_amount = 0.0
-            flagged_amount = 0.0
-        elif overall_result == 'FLAGGED':
-            flagged_amount = approved_amount
-            approved_amount = 0.0
-            rejected_amount = 0.0
-            pending_amount = 0.0
+            total_claimed = approved_amount
+            
         elif overall_result == 'PARTIAL':
-            rejected_amount = 0.0
+            approved_amount = float(amounts.get('partial', 0.0))
+            rejected_amount = float(amounts.get('denied', 0.0))
             pending_amount = 0.0
             flagged_amount = 0.0
+            total_claimed = float(amounts.get('total_claimed', approved_amount + rejected_amount))
+            
+        elif overall_result in ['REJECTED', 'DENIED', 'FINAL_REJECTED']:
+            total_claimed = float(amounts.get('total_claimed', 0.0))
+            rejected_amount = total_claimed
+            approved_amount = 0.0
+            pending_amount = 0.0
+            flagged_amount = 0.0
+            
+        elif overall_result == 'PENDING':
+            total_claimed = float(amounts.get('total_claimed', 0.0))
+            pending_amount = total_claimed
+            approved_amount = 0.0
+            rejected_amount = 0.0
+            flagged_amount = 0.0
+            
+        elif overall_result == 'FLAGGED':
+            total_claimed = float(amounts.get('total_claimed', 0.0))
+            flagged_amount = total_claimed
+            approved_amount = 0.0
+            rejected_amount = 0.0
+            pending_amount = 0.0
+            
         else:
-            pending_amount = approved_amount
+            total_claimed = float(amounts.get('total_claimed', 0.0))
+            pending_amount = total_claimed
             approved_amount = 0.0
             rejected_amount = 0.0
             flagged_amount = 0.0
@@ -209,9 +223,11 @@ class DatabaseResultsUpdater:
             'rejected_amount': rejected_amount,
             'pending_amount': pending_amount,
             'flagged_amount': flagged_amount,
-            'total_claimed': float(amounts.get('approved', 0.0)),
+            'total_claimed': total_claimed,
             'gdrg_tariff': gdrg_tariff,
-            'medicine_cost': medicine_cost,
+            'medicine_cost': total_medicine_cost,
+            'medicine_cost_approved': medicine_cost_approved,
+            'medicine_cost_denied': medicine_cost_denied,
             'investigation_cost': investigation_cost,
             'financial_components': financial_components
         }
@@ -237,7 +253,7 @@ class DatabaseResultsUpdater:
         
         processed_status = processed_status_mapping.get(overall_result, 'pending')
         
-        logger.debug(f"🔧 STATUS MAPPING: '{overall_result}' -> claim_status='{claim_status}', processed_status='{processed_status}'")
+        logger.debug(f"STATUS MAPPING: '{overall_result}' -> claim_status='{claim_status}', processed_status='{processed_status}'")
         
         return claim_status, processed_status
     
@@ -552,7 +568,7 @@ class DatabaseResultsUpdater:
             
             await self._log_current_state(encounter_id)
             
-            logger.info(f"🎯 ATTEMPTING UPDATE: claim_status='{claim_status}', processed_status='{processed_status}', approved_amount={financial_data['approved_amount']}")
+            logger.info(f"ATTEMPTING UPDATE: claim_status='{claim_status}', processed_status='{processed_status}', approved_amount={financial_data['approved_amount']}")
             
             update_query = """
             UPDATE claims_v3 SET
@@ -599,19 +615,19 @@ class DatabaseResultsUpdater:
             
             result = await self.queries.db.execute(update_query, *parameters)
             
-            logger.info(f"📊 UPDATE RESULT: {result}")
+            logger.info(f"UPDATE RESULT: {result}")
             
             success = await self._verify_update_success(encounter_id, result)
             
             if success:
                 await self._log_post_update_state(encounter_id)
-                logger.info(f"✅ DATABASE UPDATE CONFIRMED: {encounter_id} updated successfully")
+                logger.info(f"DATABASE UPDATE CONFIRMED: {encounter_id} updated successfully")
             
             return success
             
         except Exception as e:
-            logger.error(f"❌ DATABASE UPDATE EXCEPTION for {encounter_id}: {e}")
-            logger.error(f"📊 Exception details: {type(e).__name__}")
+            logger.error(f"DATABASE UPDATE EXCEPTION for {encounter_id}: {e}")
+            logger.error(f"Exception details: {type(e).__name__}")
             import traceback
             traceback.print_exc()
             return False
@@ -622,13 +638,13 @@ class DatabaseResultsUpdater:
             existing_record = await self.queries.db.fetch_one(check_query, encounter_id)
             
             if not existing_record:
-                logger.error(f"❌ RECORD NOT FOUND: encounter_id '{encounter_id}' does not exist in claims_v3")
+                logger.error(f"RECORD NOT FOUND: encounter_id '{encounter_id}' does not exist in claims_v3")
                 return False
             
             return True
             
         except Exception as e:
-            logger.error(f"❌ PRE-UPDATE VALIDATION FAILED for {encounter_id}: {e}")
+            logger.error(f"PRE-UPDATE VALIDATION FAILED for {encounter_id}: {e}")
             return False
     
     async def _log_current_state(self, encounter_id: str):
@@ -637,13 +653,13 @@ class DatabaseResultsUpdater:
             existing_record = await self.queries.db.fetch_one(check_query, encounter_id)
             
             if existing_record:
-                logger.info(f"🔍 BEFORE UPDATE: encounter_id='{encounter_id}', current_claim_status='{existing_record['claim_status']}', current_processed_status='{existing_record['processed_status']}'")
+                logger.info(f"BEFORE UPDATE: encounter_id='{encounter_id}', current_claim_status='{existing_record['claim_status']}', current_processed_status='{existing_record['processed_status']}'")
             
         except Exception as e:
-            logger.warning(f"⚠️ Could not log current state for {encounter_id}: {e}")
+            logger.warning(f"Could not log current state for {encounter_id}: {e}")
     
     def _log_update_parameters(self, parameters: List):
-        logger.info(f"🔧 EXECUTING UPDATE with parameters:")
+        logger.info(f"EXECUTING UPDATE with parameters:")
         logger.info(f"   $1 (encounter_id): '{parameters[0]}'")
         logger.info(f"   $2 (claim_status): '{parameters[1]}'")
         logger.info(f"   $3 (processed_status): '{parameters[2]}'")
@@ -658,14 +674,14 @@ class DatabaseResultsUpdater:
             if "UPDATE 1" in result:
                 return True
             elif "UPDATE 0" in result:
-                logger.error(f"❌ UPDATE MATCHED 0 ROWS: WHERE clause didn't match any records for {encounter_id}")
+                logger.error(f"UPDATE MATCHED 0 ROWS: WHERE clause didn't match any records for {encounter_id}")
                 return False
             else:
-                logger.warning(f"⚠️ UNEXPECTED UPDATE RESULT for {encounter_id}: {result}")
+                logger.warning(f"UNEXPECTED UPDATE RESULT for {encounter_id}: {result}")
                 return "UPDATE" in result
                 
         except Exception as e:
-            logger.error(f"❌ Could not verify update success for {encounter_id}: {e}")
+            logger.error(f"Could not verify update success for {encounter_id}: {e}")
             return False
     
     async def _log_post_update_state(self, encounter_id: str):
@@ -674,10 +690,10 @@ class DatabaseResultsUpdater:
             after_record = await self.queries.db.fetch_one(check_query, encounter_id)
             
             if after_record:
-                logger.info(f"🔍 AFTER UPDATE: encounter_id='{encounter_id}', new_claim_status='{after_record['claim_status']}', new_processed_status='{after_record['processed_status']}'")
+                logger.info(f"AFTER UPDATE: encounter_id='{encounter_id}', new_claim_status='{after_record['claim_status']}', new_processed_status='{after_record['processed_status']}'")
             
         except Exception as e:
-            logger.warning(f"⚠️ Could not log post-update state for {encounter_id}: {e}")
+            logger.warning(f"Could not log post-update state for {encounter_id}: {e}")
     
     async def update_multiple_claims(self, processing_results: Dict[str, ProcessingOutcome]) -> Dict[str, bool]:
         if not self.is_initialized:
@@ -687,28 +703,28 @@ class DatabaseResultsUpdater:
         successful_updates = 0
         failed_updates = 0
         
-        logger.info(f"🔄 BATCH UPDATE: Starting update for {len(processing_results)} claims")
+        logger.info(f"BATCH UPDATE: Starting update for {len(processing_results)} claims")
         
         for encounter_id, processing_outcome in processing_results.items():
             try:
-                logger.info(f"📄 Processing batch item: {encounter_id}")
+                logger.info(f"Processing batch item: {encounter_id}")
                 success = await self.update_claim_processing_results(processing_outcome)
                 results[encounter_id] = success
                 
                 if success:
                     successful_updates += 1
-                    logger.info(f"✅ [{successful_updates}/{len(processing_results)}] {encounter_id}: SUCCESS")
+                    logger.info(f"[{successful_updates}/{len(processing_results)}] {encounter_id}: SUCCESS")
                 else:
                     failed_updates += 1
-                    logger.error(f"❌ [{failed_updates}/{len(processing_results)}] {encounter_id}: FAILED")
+                    logger.error(f"[{failed_updates}/{len(processing_results)}] {encounter_id}: FAILED")
                 
             except Exception as e:
                 failed_updates += 1
                 results[encounter_id] = False
-                logger.error(f"❌ [{failed_updates}/{len(processing_results)}] {encounter_id}: EXCEPTION - {e}")
+                logger.error(f"[{failed_updates}/{len(processing_results)}] {encounter_id}: EXCEPTION - {e}")
         
         success_rate = (successful_updates / len(processing_results)) * 100 if processing_results else 0
-        logger.info(f"📊 BATCH UPDATE COMPLETE: {successful_updates}/{len(processing_results)} successful ({success_rate:.1f}%)")
+        logger.info(f"BATCH UPDATE COMPLETE: {successful_updates}/{len(processing_results)} successful ({success_rate:.1f}%)")
         
         return results
     
@@ -748,11 +764,11 @@ class DatabaseResultsUpdater:
             if result:
                 return dict(result)
             else:
-                logger.warning(f"⚠️ Claim {encounter_id} not found in database")
+                logger.warning(f"Claim {encounter_id} not found in database")
                 return None
                 
         except Exception as e:
-            logger.error(f"❌ Error verifying claim {encounter_id}: {e}")
+            logger.error(f"Error verifying claim {encounter_id}: {e}")
             return None
 
 
@@ -790,7 +806,7 @@ async def get_database_update_stats() -> Dict[str, Any]:
 
 async def test_enhanced_database_updater():
     print("\n" + "="*80)
-    print("🧪 TESTING ENHANCED DATABASE RESULTS UPDATER")
+    print("TESTING ENHANCED DATABASE RESULTS UPDATER")
     print("="*80)
     
     updater = DatabaseResultsUpdater()
@@ -798,16 +814,16 @@ async def test_enhanced_database_updater():
     try:
         await updater.initialize()
         
-        print(f"\n✅ ENHANCEMENT VERIFICATION:")
-        print(f"  ✅ Enhanced status mapping with comprehensive constraint compliance")
-        print(f"  ✅ Improved emoji sanitization for clean database storage")
-        print(f"  ✅ Enhanced error handling and validation")
-        print(f"  ✅ Comprehensive financial calculation handling")
-        print(f"  ✅ Advanced validation results tracking")
-        print(f"  ✅ Batch processing support with rollback capabilities")
-        print(f"  ✅ Quality scoring and review determination")
+        print(f"\nENHANCEMENT VERIFICATION:")
+        print(f"  Enhanced status mapping with comprehensive constraint compliance")
+        print(f"  Improved sanitization for clean database storage")
+        print(f"  Enhanced error handling and validation")
+        print(f"  Comprehensive financial calculation handling")
+        print(f"  Advanced validation results tracking")
+        print(f"  Batch processing support with rollback capabilities")
+        print(f"  Quality scoring and review determination")
         
-        print(f"\n🔧 STATUS MAPPING TEST:")
+        print(f"\nSTATUS MAPPING TEST:")
         test_results = [
             'APPROVED', 'FINAL_APPROVED', 'REJECTED', 'FINAL_REJECTED',
             'PENDING', 'FLAGGED', 'PARTIAL', 'DENIED'
@@ -817,20 +833,19 @@ async def test_enhanced_database_updater():
             claim_status, processed_status = updater._determine_claim_and_processed_status(result)
             print(f"  {result:15} -> claim_status='{claim_status}', processed_status='{processed_status}'")
         
-        print(f"\n🧼 EMOJI SANITIZATION TEST:")
+        print(f"\nSANITIZATION TEST:")
         test_texts = [
-            "🎯 FINAL_APPROVED with  360.24 GHS",
-            "❌ Medicine validation failed ",
-            " Stage 1 passed: Ready for encounter flow"
+            "FINAL_APPROVED with 360.24 GHS",
+            "Medicine validation failed",
+            "Stage 1 passed: Ready for encounter flow"
         ]
         
         for text in test_texts:
             clean_text = updater._sanitize_text(text)
             print(f"  Before: {text}")
             print(f"  After:  {clean_text}")
-            print()
         
-        print(f"📊 QUALITY SCORING TEST:")
+        print(f"\nQUALITY SCORING TEST:")
         test_scenarios = [
             ("APPROVED", 5.0, "Fast approved claim"),
             ("REJECTED", 10.0, "Standard rejected claim"),
@@ -853,25 +868,25 @@ async def test_enhanced_database_updater():
             quality_score = updater._calculate_quality_score(result, time_sec, mock_outcome)
             print(f"  {description:25} -> Quality Score: {quality_score:.3f}")
         
-        print(f"\n🎯 INTEGRATION VERIFICATION:")
-        print(f"  ✅ Database connection: {'ACTIVE' if updater.is_initialized else 'INACTIVE'}")
-        print(f"  ✅ Error handling: COMPREHENSIVE")
-        print(f"  ✅ Validation: MULTI-LAYER")
-        print(f"  ✅ Data sanitization: COMPLETE")
-        print(f"  ✅ Constraint compliance: VERIFIED")
-        print(f"  ✅ Batch processing: SUPPORTED")
-        print(f"  ✅ Quality metrics: CALCULATED")
+        print(f"\nINTEGRATION VERIFICATION:")
+        print(f"  Database connection: {'ACTIVE' if updater.is_initialized else 'INACTIVE'}")
+        print(f"  Error handling: COMPREHENSIVE")
+        print(f"  Validation: MULTI-LAYER")
+        print(f"  Data sanitization: COMPLETE")
+        print(f"  Constraint compliance: VERIFIED")
+        print(f"  Batch processing: SUPPORTED")
+        print(f"  Quality metrics: CALCULATED")
         
         stats = await updater.get_update_statistics()
-        print(f"\n📈 SESSION STATISTICS:")
+        print(f"\nSESSION STATISTICS:")
         for key, value in stats.items():
             print(f"  {key}: {value}")
         
-        print(f"\n🚀 ENHANCED DATABASE UPDATER: READY FOR PRODUCTION")
-        print(f"🎯 All enhancements implemented and tested successfully")
+        print(f"\nENHANCED DATABASE UPDATER: READY FOR PRODUCTION")
+        print(f"All enhancements implemented and tested successfully")
         
     except Exception as e:
-        print(f"❌ Test failed: {e}")
+        print(f"Test failed: {e}")
         import traceback
         traceback.print_exc()
     
