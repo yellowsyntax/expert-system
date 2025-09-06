@@ -116,7 +116,10 @@ class DatabaseResultsUpdater:
                 inference_rules=inference_rules,
                 processing_time=processing_time,
                 review_required=review_required,
-                quality_score=quality_score
+                quality_score=quality_score,
+                overall_result=overall_result,
+                processing_stage=processing_stage,
+                processing_outcome=processing_outcome
             )
             
             if success:
@@ -185,7 +188,7 @@ class DatabaseResultsUpdater:
             
         elif overall_result == 'PARTIAL':
             approved_amount = float(amounts.get('partial', 0.0))
-            rejected_amount = float(amounts.get('denied', 0.0))
+            rejected_amount = float(amounts.get('denied', 0.0)) + medicine_cost_denied
             pending_amount = 0.0
             flagged_amount = 0.0
             total_claimed = float(amounts.get('total_claimed', approved_amount + rejected_amount))
@@ -360,7 +363,7 @@ class DatabaseResultsUpdater:
     
     def _build_rejection_reasons_enhanced(self, processing_outcome: ProcessingOutcome, 
                                         overall_result: str, processing_stage: str) -> Optional[List[Dict]]:
-        if overall_result in ['APPROVED', 'FINAL_APPROVED']:
+        if overall_result in ['APPROVED', 'FINAL_APPROVED', 'FLAGGED']:
             return None
         
         rejection_reasons = []
@@ -561,7 +564,8 @@ class DatabaseResultsUpdater:
                                               financial_data: Dict, amount_breakdown: Dict,
                                               validation_results: Dict, rejection_reasons: Optional[List],
                                               inference_rules: Dict, processing_time: float,
-                                              review_required: bool, quality_score: float) -> bool:
+                                              review_required: bool, quality_score: float, overall_result: str,
+                                              processing_stage: str, processing_outcome: ProcessingOutcome) -> bool:
         try:
             if not await self._validate_before_update(encounter_id):
                 return False
@@ -569,6 +573,17 @@ class DatabaseResultsUpdater:
             await self._log_current_state(encounter_id)
             
             logger.info(f"ATTEMPTING UPDATE: claim_status='{claim_status}', processed_status='{processed_status}', approved_amount={financial_data['approved_amount']}")
+            
+            # Build flag reasons for FLAGGED claims
+            flag_reasons = None
+            if overall_result == 'FLAGGED':
+                flag_reasons = {
+                    "stage": processing_stage,
+                    "reason": processing_outcome.reason,
+                    "timestamp": datetime.now().isoformat(),
+                    "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
+                    "requires_manual_review": True
+                }
             
             update_query = """
             UPDATE claims_v3 SET
@@ -584,12 +599,13 @@ class DatabaseResultsUpdater:
                 amount_breakdown = $9,
                 validation_results = $10,
                 rejection_reasons = $11,
-                inference_rules_applied = $12,
+                flag_reasons = $12,
+                inference_rules_applied = $13,
                 processing_engine_version = 'v2.0_enhanced',
                 processed_by = 'NHIS_Expert_System',
                 auto_processed = true,
-                review_required = $13,
-                quality_score = $14,
+                review_required = $14,
+                quality_score = $15,
                 updated_at = CURRENT_TIMESTAMP
             WHERE encounter_id = $1
             """
@@ -606,6 +622,7 @@ class DatabaseResultsUpdater:
                 json.dumps(amount_breakdown),
                 json.dumps(validation_results),
                 json.dumps(rejection_reasons) if rejection_reasons else None,
+                json.dumps(flag_reasons) if flag_reasons else None,
                 json.dumps(inference_rules),
                 review_required,
                 quality_score
