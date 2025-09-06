@@ -1295,7 +1295,7 @@ class AutomatedBatchProcessor:
                     "gdrg_tariff": round(gdrg_tariff, 2),
                     "medicine_cost_approved": round(medicine_approved, 2),
                     "medicine_cost_denied": round(medicine_denied, 2),
-                    "approved": 0.0,
+                    "approved": round(total_approved, 2),
                     "partial": round(total_approved, 2),
                     "denied": round(medicine_denied, 2),
                     "total_claimed": round(total_approved + medicine_denied, 2)
