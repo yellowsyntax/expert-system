@@ -577,13 +577,32 @@ class DatabaseResultsUpdater:
             # Build flag reasons for FLAGGED claims
             flag_reasons = None
             if overall_result == 'FLAGGED':
-                flag_reasons = {
-                    "stage": processing_stage,
-                    "reason": processing_outcome.reason,
-                    "timestamp": datetime.now().isoformat(),
-                    "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
-                    "requires_manual_review": True
-                }
+                # Check if structured flag reason already exists (e.g., from OPDC13A detection)
+                if hasattr(processing_outcome, 'details') and processing_outcome.details:
+                    existing_flag_reason = processing_outcome.details.get('flag_reason')
+                    if isinstance(existing_flag_reason, dict) and existing_flag_reason.get('gdrg_code'):
+                        flag_reasons = existing_flag_reason  # Use the structured OPDC13A reason
+                        logger.info(f"Using structured OPDC13A flag reason for {encounter_id}")
+                    else:
+                        # Create generic structured reason
+                        flag_reasons = {
+                            "stage": processing_stage,
+                            "reason": processing_outcome.reason,
+                            "timestamp": datetime.now().isoformat(),
+                            "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
+                            "requires_manual_review": True
+                        }
+                        logger.info(f"Using generic structured flag reason for {encounter_id}")
+                else:
+                    # Create generic structured reason
+                    flag_reasons = {
+                        "stage": processing_stage,
+                        "reason": processing_outcome.reason,
+                        "timestamp": datetime.now().isoformat(),
+                        "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
+                        "requires_manual_review": True
+                    }
+                    logger.info(f"Using fallback structured flag reason for {encounter_id}")
             
             update_query = """
             UPDATE claims_v3 SET
@@ -629,6 +648,9 @@ class DatabaseResultsUpdater:
             ]
             
             self._log_update_parameters(parameters)
+            
+            if flag_reasons:
+                logger.info(f"Flag reasons being stored: {json.dumps(flag_reasons, indent=2)}")
             
             result = await self.queries.db.execute(update_query, *parameters)
             

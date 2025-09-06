@@ -1120,12 +1120,27 @@ class AutomatedBatchProcessor:
             if result_value == "FLAGGED":
                 if not pipeline_results.get("flagged_at_stage"):
                     pipeline_results["flagged_at_stage"] = "stage5_gdrg_determination"
-                    pipeline_results["flag_reason"] = result.reason
+                    pipeline_results["flag_reason"] = {
+                        "stage": "GDRG_DETERMINATION",
+                        "reason": "Stage 5 flagged: OPDC13A detected - Manual review required",
+                        "timestamp": datetime.now().isoformat(),
+                        "category": "GDRG_DETERMINATION",
+                        "requires_manual_review": True
+                    }
             
             if result_value == "FLAGGED" and result.details:
                 gdrg_determination = result.details.get('gdrg_determination', {})
                 if gdrg_determination and gdrg_determination.get('final_gdrg') == 'OPDC13A':
                     logger.warning(f"OPDC13A flagged - Will stop processing after this stage for {encounter_id}")
+
+                    pipeline_results["flag_reason"] = {
+                        "stage": "GDRG_DETERMINATION",
+                        "reason": "Stage 5 flagged: OPDC13A detected - Manual review required",
+                        "timestamp": datetime.now().isoformat(),
+                        "category": "GDRG_DETERMINATION",
+                        "requires_manual_review": True,
+                        "gdrg_code": "OPDC13A"
+                    }
                     
                     pipeline_results["stages_passed"].append({
                         "stage": "stage5_gdrg_determination", 
@@ -1147,6 +1162,16 @@ class AutomatedBatchProcessor:
                     special_case_details = step_results.get('special_case_details', {})
                     if special_case_details.get('special_case_type') == 'OPDC13A_SUPPORTING_DOCS':
                         logger.warning(f"OPDC13A special case flagged - Will stop processing after this stage for {encounter_id}")
+                        
+                        pipeline_results["flag_reason"] = {
+                            "stage": "GDRG_DETERMINATION",
+                            "reason": "Stage 5 flagged: OPDC13A special case - Supporting documents required",
+                            "timestamp": datetime.now().isoformat(),
+                            "category": "GDRG_DETERMINATION",
+                            "requires_manual_review": True,
+                            "gdrg_code": "OPDC13A",
+                            "special_case_type": "OPDC13A_SUPPORTING_DOCS"
+                        }
                         
                         pipeline_results["stages_passed"].append({
                             "stage": "stage5_gdrg_determination",
