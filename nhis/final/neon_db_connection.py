@@ -34,12 +34,12 @@ class NeonDBConnection:
     def __init__(self):
         # Default connection string - can be overridden
         self.database_url = os.getenv(
-           # "DATABASE_URL", 
-            #"postgresql://postgres:LM2GGiGjaKtCVJNvPZRk@paiv-rds-master.cmpgm4w8w0fx.us-east-1.rds.amazonaws.com/postgres?sslmode=require"
-        #)
-        "DATABASE_URL", 
-            "postgresql://neondb_owner:npg_Emq9gohbK8se@ep-sweet-hill-a46reakw-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+            "DATABASE_URL", 
+            "postgresql://postgres:qa%5DR7YQ%5E~%7Db2%23zQ@paiv-db.cbcamw2i4fx7.us-east-1.rds.amazonaws.com/postgres?sslmode=require"
         )
+        #"DATABASE_URL", 
+        #    "postgresql://neondb_owner:npg_Emq9gohbK8se@ep-sweet-hill-a46reakw-pooler.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+        #)
         self.is_connected = False
         self.pool_config = {
             'min_size': 5,
@@ -269,7 +269,7 @@ class NHISQueries:
         try:
             from datetime import datetime, date
             
-            # Handle both string and datetime object inputs
+            
             if isinstance(date_of_birth, datetime):
                 dob = date_of_birth.date()
             elif isinstance(date_of_birth, date):

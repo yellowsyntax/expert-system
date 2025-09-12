@@ -365,7 +365,7 @@ class DatabaseResultsUpdater:
     
     def _build_rejection_reasons_enhanced(self, processing_outcome: ProcessingOutcome, 
                                         overall_result: str, processing_stage: str) -> Optional[List[Dict]]:
-        if overall_result in ['APPROVED', 'FINAL_APPROVED']:
+        if overall_result in ['APPROVED', 'FINAL_APPROVED', 'PARTIAL']:
             return None
         
         rejection_reasons = []
