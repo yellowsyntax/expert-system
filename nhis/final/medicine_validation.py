@@ -190,7 +190,9 @@ class MedicineValidationStep6:
                     total_medicine_cost_approved += individual_result['cost']
                 elif individual_result['final_status'] == 'REJECTED':
                     rejected_medicines.append(individual_result)
-                    # Note: No cost added for rejected medicines
+                    
+
+            total_medicine_cost_rejected = sum(med['cost'] for med in rejected_medicines)
             
             # Store detailed results
             step_results["medicine_results"] = {
@@ -201,8 +203,10 @@ class MedicineValidationStep6:
             
             step_results["medicine_costs"] = {
                 "approved_cost": total_medicine_cost_approved,
+                "rejected_cost": total_medicine_cost_rejected,
                 "rejected_count": len(rejected_medicines),
-                "total_cost": total_medicine_cost_approved
+                "total_cost": total_medicine_cost_approved,
+                "total_cost": total_medicine_cost_approved + total_medicine_cost_rejected
             }
             
             # Create medicine outcomes for compatibility
@@ -221,22 +225,47 @@ class MedicineValidationStep6:
             
             # Determine overall result based on individual medicine results
             if rejected_medicines and not approved_medicines and not partial_medicines:
-                # All medicines rejected
+                # All medicines rejected - collect specific reasons
+                specific_reasons = []
+                primary_reason = None
+                
+                for med in rejected_medicines:
+                    if med.get('rejection_reason'):
+                        specific_reasons.append(med['rejection_reason'])
+                        if not primary_reason:
+                            primary_reason = med['rejection_reason']
+                
+                # Get the most common reason or use the first one
+                if specific_reasons:
+                    from collections import Counter
+                    reason_counts = Counter(specific_reasons)
+                    most_common_reason = reason_counts.most_common(1)[0][0]
+                    primary_reason = most_common_reason
+                else:
+                    primary_reason = "Medicine validation failed"
+                
                 step_results["steps_failed"].append({
                     "step": "individual_medicine_validation",
                     "status": "FAILED",
-                    "message": f"All {len(rejected_medicines)} medicines rejected",
-                    "details": {"rejected_count": len(rejected_medicines)}
+                    "message": f"All {len(rejected_medicines)} medicines rejected: {primary_reason}",
+                    "details": {
+                        "rejected_count": len(rejected_medicines),
+                        "specific_reasons": specific_reasons,
+                        "primary_reason": primary_reason
+                    }
                 })
                 step_results["overall_result"] = "REJECTED"
-                step_results["specific_rejection_reasons"] = list(set([med.get('rejection_reason', 'Medicine validation failed') for med in rejected_medicines]))
+                step_results["specific_rejection_reasons"] = specific_reasons
                 
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
-                    reason=f"REJECT: All medicines failed validation",
+                    reason=f"REJECT: {primary_reason}", 
                     details={
                         "encounter_id": encounter_id,
                         "rejected_medicines": len(rejected_medicines),
+                        "specific_rejection_reason": primary_reason,
+                        "all_rejection_reasons": specific_reasons,
+                        "rejected_medicine_details": rejected_medicines,
                         "total_medicine_cost": 0.0,
                         "medicine_cost_approved": 0.0,
                         "medicine_cost_denied": 0.0,
@@ -249,7 +278,14 @@ class MedicineValidationStep6:
                 )
             
             elif rejected_medicines and (approved_medicines or partial_medicines):
-                # Some medicines approved, some rejected = PARTIAL
+                # Partial approval - collect rejection reasons for rejected medicines
+                specific_reasons = []
+                for med in rejected_medicines:
+                    if med.get('rejection_reason'):
+                        specific_reasons.append(med['rejection_reason'])
+                
+                primary_reason = specific_reasons[0] if specific_reasons else "Some medicines rejected"
+                
                 step_results["steps_passed"].append({
                     "step": "individual_medicine_validation",
                     "status": "PARTIAL",
@@ -257,34 +293,37 @@ class MedicineValidationStep6:
                     "details": {
                         "approved_count": len(approved_medicines),
                         "partial_count": len(partial_medicines),
-                        "rejected_count": len(rejected_medicines)
+                        "rejected_count": len(rejected_medicines),
+                        "rejection_reasons": specific_reasons
                     }
                 })
                 step_results["overall_result"] = "PARTIAL"
                 
                 return ValidationOutcome(
-                    result=ValidationResult.PARTIAL,
-                    reason="PARTIAL: Some medicines approved, others rejected",
-                    details={
-                        "encounter_id": encounter_id,
-                        "approved_medicines": len(approved_medicines),
-                        "partial_medicines": len(partial_medicines),
-                        "rejected_medicines": len(rejected_medicines),
-                        "total_medicine_cost": round(total_medicine_cost_approved, 2),
-                        "medicine_cost_approved": round(total_medicine_cost_approved, 2),
-                        "medicine_cost_denied": 0.0,
-                        "has_rejections": True,
-                        "next_step": "Step 7: Investigation Validation",
-                        "step_by_step_results": step_results,
-                        "stage6_details": {
-                            "medicine_outcomes": medicine_outcomes
-                        },
-                        "category": "Medicine Validation Partial"
-                    }
-                )
+                result=ValidationResult.PARTIAL,
+                reason=f"PARTIAL: Some medicines approved, others rejected due to {primary_reason}",
+                details={
+                    "encounter_id": encounter_id,
+                    "approved_medicines": len(approved_medicines),
+                    "partial_medicines": len(partial_medicines),
+                    "rejected_medicines": len(rejected_medicines),
+                    "specific_rejection_reason": primary_reason,
+                    "all_rejection_reasons": specific_reasons,
+                    "total_medicine_cost": round(total_medicine_cost_approved, 2),
+                    "medicine_cost_approved": round(total_medicine_cost_approved, 2),
+                    "medicine_cost_denied": round(total_medicine_cost_rejected, 2),
+                    "has_rejections": True,
+                    "next_step": "Step 7: Investigation Validation",
+                    "step_by_step_results": step_results,
+                    "stage6_details": {
+                        "medicine_outcomes": medicine_outcomes
+                    },
+                    "category": "Medicine Validation Partial"
+                }
+            )
             
             else:
-                # All medicines approved or partial (no rejections)
+                
                 step_results["steps_passed"].append({
                     "step": "individual_medicine_validation",
                     "status": "PASSED",
@@ -304,7 +343,7 @@ class MedicineValidationStep6:
                         "medicines_validated": len(approved_medicines) + len(partial_medicines),
                         "total_medicine_cost": round(total_medicine_cost_approved, 2),
                         "medicine_cost_approved": round(total_medicine_cost_approved, 2),
-                        "medicine_cost_denied": 0.0,
+                        "medicine_cost_denied": round(total_medicine_cost_rejected, 2),
                         "has_rejections": False,
                         "next_step": "Step 7: Investigation Validation",
                         "step_by_step_results": step_results,
@@ -341,7 +380,7 @@ class MedicineValidationStep6:
         try:
             medicine_code = medicine['medicine_code']
             
-            # Check specific issues for this medicine
+            
             individual_issues = []
             
             # Check admission period for this medicine
@@ -477,15 +516,20 @@ class MedicineValidationStep6:
             if dosage_result == DosageResult.WITHIN_LIMITS:
                 final_status = 'APPROVED'
                 final_cost = calculated_tariff.get('total_cost', 0.0)
+                rejection_reason = None
             elif dosage_result == DosageResult.MODERATE_OVERSUPPLY:
                 final_status = 'PARTIAL'
                 final_cost = calculated_tariff.get('total_cost', 0.0)
+                rejection_reason = None
             elif dosage_result == DosageResult.EXCESSIVE_OVERSUPPLY:
                 final_status = 'REJECTED'
-                final_cost = 0.0  # No cost for rejected medicines
+                final_cost = 0.0  # Set to 0 for rejected medicines
+                # GET THE SPECIFIC REJECTION REASON FROM calculated_tariff
+                rejection_reason = calculated_tariff.get('validation_result', 'Medicine validation failed')
             else:
                 final_status = 'APPROVED'
                 final_cost = calculated_tariff.get('total_cost', 0.0)
+                rejection_reason = None
             
             return {
                 'medicine_code': medicine_code,
@@ -494,7 +538,7 @@ class MedicineValidationStep6:
                 'frequency': medicine.get('frequency', ''),
                 'duration_days': medicine.get('duration_days', 0),
                 'final_status': final_status,
-                'rejection_reason': calculated_tariff.get('validation_result') if final_status == 'REJECTED' else None,
+                'rejection_reason': rejection_reason,  # Now uses the specific reason
                 'cost': final_cost,
                 'dosage_result': dosage_result.value,
                 'validation_details': self._get_dosage_validation_details(medicine, dosage_result, standard_dosage_info),
@@ -1516,9 +1560,9 @@ class MedicineValidationStep6:
                               prescribed_amount: float, standard_amount: float, tariff_unit_amount: float) -> float:
         try:
             if dosage_result == DosageResult.EXCESSIVE_OVERSUPPLY:
-                # For rejected medicines, return 0 cost
-                logger.info(f"Excessive oversupply - rejected medicine {medicine_code}, cost = 0.00 GHS")
-                return 0.0
+                would_be_cost = frequency_multiplier * unit_price * duration_days * (prescribed_amount / tariff_unit_amount if tariff_unit_amount > 0 else 1.0)
+                logger.info(f"REJECTED medicine {medicine_code}: Cost would be {would_be_cost:.2f} GHS but rejected, setting to 0.0 GHS")
+                return would_be_cost
             elif dosage_result == DosageResult.MODERATE_OVERSUPPLY:
                 effective_dosage_ratio = standard_amount / tariff_unit_amount if tariff_unit_amount > 0 else 1.0
                 logger.info(f"Moderate oversupply - using standard amount ({standard_amount}) for {medicine_code}")

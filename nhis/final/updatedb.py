@@ -8,6 +8,7 @@ import aiohttp
 
 from shared_types import ProcessingOutcome, ValidationResult, ProcessingStage
 from neon_db_connection import get_nhis_queries, initialize_database, close_database
+from rejection_categorizer import SmartRejectionCategorizer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ class DatabaseResultsUpdater:
             'total_processed': 0
         }
         self._current_batch_id = None
+        self.rejection_categorizer = SmartRejectionCategorizer()
 
     async def _trigger_websocket_update(self, encounter_id: str, batch_id: str = None,
                                        processed_status: str = "approved"):
@@ -368,32 +370,32 @@ class DatabaseResultsUpdater:
         
         rejection_reasons = []
         
+        try:
+            smart_category_info = self.rejection_categorizer.categorize_rejection(
+                processing_outcome.reason, processing_stage
+            )
+            smart_category = smart_category_info.category
+            smart_subcategory = smart_category_info.subcategory
+            smart_action = smart_category_info.action_required
+        except Exception as e:
+            logger.warning(f"Smart categorization failed: {e}")
+            smart_category = self._categorize_rejection_reason(processing_outcome.reason, processing_stage)
+            smart_subcategory = None
+            smart_action = "Review and address the identified issue"
+        
+        clean_reason = processing_outcome.reason
+        if "Stage" in clean_reason and "failed:" in clean_reason:
+            clean_reason = clean_reason.split("failed: ", 1)[-1]
+        
         primary_reason = {
-            "stage": processing_stage,
-            "reason": self._sanitize_text(processing_outcome.reason),
-            "timestamp": datetime.now().isoformat(),
-            "severity": self._determine_rejection_severity(overall_result),
-            "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage)
+            "reason": self._sanitize_text(clean_reason),
+            "rejection_category": smart_category,
+            "rejection_subcategory": smart_subcategory,
+            "recommended_action": smart_action,
+            "timestamp": datetime.now().isoformat()
         }
         
-        details = self._extract_rejection_details_enhanced(processing_outcome, processing_stage)
-        if details:
-            primary_reason["details"] = details
-        
         rejection_reasons.append(primary_reason)
-        
-        if processing_outcome.details:
-            comprehensive_results = processing_outcome.details.get('comprehensive_results', {})
-            for failed_stage in comprehensive_results.get('stages_failed', []):
-                if isinstance(failed_stage, dict):
-                    additional_reason = {
-                        "stage": failed_stage.get('stage', 'UNKNOWN'),
-                        "reason": self._sanitize_text(failed_stage.get('message', 'No reason provided')),
-                        "status": failed_stage.get('status', 'FAILED'),
-                        "timestamp": datetime.now().isoformat(),
-                        "severity": "SECONDARY"
-                    }
-                    rejection_reasons.append(additional_reason)
         
         return [self._sanitize_dict_recursive(reason) for reason in rejection_reasons]
     
@@ -408,20 +410,25 @@ class DatabaseResultsUpdater:
             return "UNKNOWN"
     
     def _categorize_rejection_reason(self, reason: str, stage: str) -> str:
-        reason_lower = reason.lower()
-        
-        if "medicine" in reason_lower or "oversupply" in reason_lower:
-            return "MEDICINE_VALIDATION"
-        elif "facility" in reason_lower or "credentialing" in reason_lower:
-            return "FACILITY_CREDENTIALING"
-        elif "gdrg" in reason_lower or "tariff" in reason_lower:
-            return "GDRG_DETERMINATION"
-        elif "eligibility" in reason_lower or "coverage" in reason_lower:
-            return "ELIGIBILITY"
-        elif stage:
-            return stage.upper()
-        else:
-            return "OTHER"
+        try:
+            category_info = self.rejection_categorizer.categorize_rejection(reason, stage)
+            return category_info.category
+        except Exception as e:
+            logger.warning(f"Error in smart categorization, falling back to basic: {e}")
+            reason_lower = reason.lower()
+            
+            if "medicine" in reason_lower or "oversupply" in reason_lower:
+                return "MEDICINE_VALIDATION"
+            elif "facility" in reason_lower or "credentialing" in reason_lower:
+                return "FACILITY_CREDENTIALING"
+            elif "gdrg" in reason_lower or "tariff" in reason_lower:
+                return "GDRG_DETERMINATION"
+            elif "eligibility" in reason_lower or "coverage" in reason_lower:
+                return "ELIGIBILITY"
+            elif stage:
+                return stage.upper()
+            else:
+                return "OTHER"
     
     def _extract_rejection_details_enhanced(self, processing_outcome: ProcessingOutcome, 
                                           processing_stage: str) -> Dict:
@@ -430,8 +437,12 @@ class DatabaseResultsUpdater:
         
         if processing_stage == "MEDICINE_VALIDATION":
             details["category"] = "Medicine Validation Failed"
-            if "excessive oversupply" in reason:
-                details["specific_issue"] = "Excessive medicine oversupply detected"
+            if "inappropriate prescription" in reason:
+                details["specific_issue"] = "Inappropriate prescription for patient condition"
+                details["recommendation"] = "Review clinical indication and prescribe appropriate medication"
+                details["action_required"] = "Verify prescription appropriateness for diagnosis"
+            elif "oversupply" in reason:
+                details["specific_issue"] = "Medicine oversupply detected"
                 details["recommendation"] = "Reduce prescribed quantities or provide clinical justification"
                 details["action_required"] = "Review prescription and dosage calculation"
             elif "formulary" in reason:
@@ -574,17 +585,14 @@ class DatabaseResultsUpdater:
             
             logger.info(f"ATTEMPTING UPDATE: claim_status='{claim_status}', processed_status='{processed_status}', approved_amount={financial_data['approved_amount']}")
             
-            # Build flag reasons for FLAGGED claims
             flag_reasons = None
             if overall_result == 'FLAGGED':
-                # Check if structured flag reason already exists (e.g., from OPDC13A detection)
                 if hasattr(processing_outcome, 'details') and processing_outcome.details:
                     existing_flag_reason = processing_outcome.details.get('flag_reason')
                     if isinstance(existing_flag_reason, dict) and existing_flag_reason.get('gdrg_code'):
-                        flag_reasons = existing_flag_reason  # Use the structured OPDC13A reason
+                        flag_reasons = existing_flag_reason
                         logger.info(f"Using structured OPDC13A flag reason for {encounter_id}")
                     else:
-                        # Create generic structured reason
                         flag_reasons = {
                             "stage": processing_stage,
                             "reason": processing_outcome.reason,
@@ -594,7 +602,6 @@ class DatabaseResultsUpdater:
                         }
                         logger.info(f"Using generic structured flag reason for {encounter_id}")
                 else:
-                    # Create generic structured reason
                     flag_reasons = {
                         "stage": processing_stage,
                         "reason": processing_outcome.reason,
