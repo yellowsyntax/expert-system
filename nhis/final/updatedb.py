@@ -365,7 +365,7 @@ class DatabaseResultsUpdater:
     
     def _build_rejection_reasons_enhanced(self, processing_outcome: ProcessingOutcome, 
                                         overall_result: str, processing_stage: str) -> Optional[List[Dict]]:
-        if overall_result in ['APPROVED', 'FINAL_APPROVED', 'FLAGGED']:
+        if overall_result in ['APPROVED', 'FINAL_APPROVED']:
             return None
         
         rejection_reasons = []
@@ -377,11 +377,16 @@ class DatabaseResultsUpdater:
             smart_category = smart_category_info.category
             smart_subcategory = smart_category_info.subcategory
             smart_action = smart_category_info.action_required
+            smart_severity = smart_category_info.severity
+            
+            logger.info(f"Smart categorization for {processing_outcome.encounter_id}: {smart_category}")
+            
         except Exception as e:
-            logger.warning(f"Smart categorization failed: {e}")
+            logger.warning(f"Smart categorization failed for {processing_outcome.encounter_id}: {e}")
             smart_category = self._categorize_rejection_reason(processing_outcome.reason, processing_stage)
             smart_subcategory = None
             smart_action = "Review and address the identified issue"
+            smart_severity = "MEDIUM"
         
         clean_reason = processing_outcome.reason
         if "Stage" in clean_reason and "failed:" in clean_reason:
@@ -391,13 +396,65 @@ class DatabaseResultsUpdater:
             "reason": self._sanitize_text(clean_reason),
             "rejection_category": smart_category,
             "rejection_subcategory": smart_subcategory,
+            "severity": smart_severity,
             "recommended_action": smart_action,
+            "processing_stage": processing_stage,
+            "overall_result": overall_result,
             "timestamp": datetime.now().isoformat()
         }
         
         rejection_reasons.append(primary_reason)
         
+        logger.info(f"Built rejection reason for {processing_outcome.encounter_id}:")
+        logger.info(f"  Category: {smart_category}")
+        logger.info(f"  Subcategory: {smart_subcategory}")
+        logger.info(f"  Severity: {smart_severity}")
+        
         return [self._sanitize_dict_recursive(reason) for reason in rejection_reasons]
+
+    def _build_flag_reasons_enhanced(self, processing_outcome: ProcessingOutcome, 
+                                   processing_stage: str) -> Optional[Dict]:
+        try:
+            smart_category_info = self.rejection_categorizer.categorize_rejection(
+                processing_outcome.reason, processing_stage
+            )
+            
+            if hasattr(processing_outcome, 'details') and processing_outcome.details:
+                existing_flag_reason = processing_outcome.details.get('flag_reason')
+                if isinstance(existing_flag_reason, dict) and existing_flag_reason.get('gdrg_code'):
+                    existing_flag_reason.update({
+                        'rejection_category': smart_category_info.category,
+                        'rejection_subcategory': smart_category_info.subcategory,
+                        'severity': smart_category_info.severity,
+                        'recommended_action': smart_category_info.action_required
+                    })
+                    return existing_flag_reason
+            
+            flag_reasons = {
+                "stage": processing_stage,
+                "reason": processing_outcome.reason,
+                "rejection_category": smart_category_info.category,
+                "rejection_subcategory": smart_category_info.subcategory,
+                "severity": smart_category_info.severity,
+                "recommended_action": smart_category_info.action_required,
+                "timestamp": datetime.now().isoformat(),
+                "requires_manual_review": True
+            }
+            
+            logger.info(f"Built flag reason for {processing_outcome.encounter_id}:")
+            logger.info(f"  Category: {smart_category_info.category}")
+            
+            return flag_reasons
+            
+        except Exception as e:
+            logger.error(f"Error building flag reasons for {processing_outcome.encounter_id}: {e}")
+            return {
+                "stage": processing_stage,
+                "reason": processing_outcome.reason,
+                "rejection_category": "SYSTEM_ERROR",
+                "timestamp": datetime.now().isoformat(),
+                "requires_manual_review": True
+            }
     
     def _determine_rejection_severity(self, overall_result: str) -> str:
         if overall_result in ['REJECTED', 'DENIED', 'FINAL_REJECTED']:
@@ -429,46 +486,6 @@ class DatabaseResultsUpdater:
                 return stage.upper()
             else:
                 return "OTHER"
-    
-    def _extract_rejection_details_enhanced(self, processing_outcome: ProcessingOutcome, 
-                                          processing_stage: str) -> Dict:
-        details = {}
-        reason = processing_outcome.reason.lower()
-        
-        if processing_stage == "MEDICINE_VALIDATION":
-            details["category"] = "Medicine Validation Failed"
-            if "inappropriate prescription" in reason:
-                details["specific_issue"] = "Inappropriate prescription for patient condition"
-                details["recommendation"] = "Review clinical indication and prescribe appropriate medication"
-                details["action_required"] = "Verify prescription appropriateness for diagnosis"
-            elif "oversupply" in reason:
-                details["specific_issue"] = "Medicine oversupply detected"
-                details["recommendation"] = "Reduce prescribed quantities or provide clinical justification"
-                details["action_required"] = "Review prescription and dosage calculation"
-            elif "formulary" in reason:
-                details["specific_issue"] = "Medicine not in NHIS formulary"
-                details["recommendation"] = "Prescribe alternative medicine from formulary"
-                details["action_required"] = "Replace with approved alternative"
-        
-        elif processing_stage == "CREDENTIALING":
-            details["category"] = "Facility Credentialing Failed"
-            details["specific_issue"] = "Facility accreditation or registration issue"
-            details["recommendation"] = "Verify facility registration and accreditation status"
-            details["action_required"] = "Update facility credentials"
-        
-        elif processing_stage == "GDRG_DETERMINATION":
-            details["category"] = "G-DRG Determination Failed"
-            details["specific_issue"] = "G-DRG mapping or tariff calculation issue"
-            details["recommendation"] = "Review ICD-10 coding and G-DRG mapping"
-            details["action_required"] = "Verify diagnosis coding"
-        
-        elif processing_stage == "INITIAL_PROCESSING":
-            details["category"] = "Initial Processing Failed"
-            details["specific_issue"] = "Basic validation or routing failed"
-            details["recommendation"] = "Review claim data completeness and accuracy"
-            details["action_required"] = "Correct missing or invalid data"
-        
-        return self._sanitize_dict_recursive(details)
     
     def _build_inference_rules_enhanced(self, processing_outcome: ProcessingOutcome, 
                                       financial_data: Dict) -> Dict:
@@ -587,29 +604,8 @@ class DatabaseResultsUpdater:
             
             flag_reasons = None
             if overall_result == 'FLAGGED':
-                if hasattr(processing_outcome, 'details') and processing_outcome.details:
-                    existing_flag_reason = processing_outcome.details.get('flag_reason')
-                    if isinstance(existing_flag_reason, dict) and existing_flag_reason.get('gdrg_code'):
-                        flag_reasons = existing_flag_reason
-                        logger.info(f"Using structured OPDC13A flag reason for {encounter_id}")
-                    else:
-                        flag_reasons = {
-                            "stage": processing_stage,
-                            "reason": processing_outcome.reason,
-                            "timestamp": datetime.now().isoformat(),
-                            "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
-                            "requires_manual_review": True
-                        }
-                        logger.info(f"Using generic structured flag reason for {encounter_id}")
-                else:
-                    flag_reasons = {
-                        "stage": processing_stage,
-                        "reason": processing_outcome.reason,
-                        "timestamp": datetime.now().isoformat(),
-                        "category": self._categorize_rejection_reason(processing_outcome.reason, processing_stage),
-                        "requires_manual_review": True
-                    }
-                    logger.info(f"Using fallback structured flag reason for {encounter_id}")
+                flag_reasons = self._build_flag_reasons_enhanced(processing_outcome, processing_stage)
+                logger.info(f"Built flag reasons with category: {flag_reasons.get('rejection_category', 'None')}")
             
             update_query = """
             UPDATE claims_v3 SET
@@ -656,8 +652,14 @@ class DatabaseResultsUpdater:
             
             self._log_update_parameters(parameters)
             
+            if rejection_reasons:
+                logger.info(f"Rejection reasons being stored for {encounter_id}:")
+                for reason in rejection_reasons:
+                    logger.info(f"  Category: {reason.get('rejection_category', 'None')}")
+            
             if flag_reasons:
-                logger.info(f"Flag reasons being stored: {json.dumps(flag_reasons, indent=2)}")
+                logger.info(f"Flag reasons being stored for {encounter_id}:")
+                logger.info(f"  Category: {flag_reasons.get('rejection_category', 'None')}")
             
             result = await self.queries.db.execute(update_query, *parameters)
             

@@ -255,6 +255,14 @@ class SmartRejectionCategorizer:
                 action_required="Contact NHIS for tariff rate clarification"
             ),
             
+            'tariff_misapplication': RejectionCategory(
+                category="Tariff Misapplication",
+                subcategory="Billing Validation",
+                description="Incorrect tariff has been applied to the claim",
+                severity="HIGH",
+                action_required="Review and correct the tariff application for the specific service"
+            ),
+            
             'patient_eligibility': RejectionCategory(
                 category="Patient Eligibility Issues",
                 subcategory="Membership Validation",

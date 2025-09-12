@@ -1638,8 +1638,8 @@ class AutomatedBatchProcessor:
             else:
                 db_update_success = await self.database_updater.update_claim_processing_results(processing_outcome)
             
-            if db_update_success:
-                await self._update_claim_status_to_processed(encounter_id, processing_outcome, pipeline_results, existing_duplicate_flag)
+           # if db_update_success:
+            #    await self._update_claim_status_to_processed(encounter_id, processing_outcome, pipeline_results, existing_duplicate_flag)
             
             processing_outcome.database_updated = db_update_success
             processing_outcome.processing_stage = ProcessingStage.DATABASE_UPDATE if db_update_success else ProcessingStage.COMPLETED
