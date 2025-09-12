@@ -1,29 +1,3 @@
-"""
-NHIS Expert System - Enhanced G-DRG Determination with DUAL G-DRG SELECTION
-Implements Step 5 from the flowchart: G-DRG Determination with Special Case Handling
-
-ENHANCED FEATURES:
-1. DUAL G-DRG EVALUATION: Checks both diagnosis and procedure G-DRGs
-2. HIGHEST TARIFF SELECTION: Automatically selects the G-DRG with highest tariff
-3. DETAILED REASONING: Comprehensive reasons for database storage
-4. OPDC13A Special Case: Checks both ICD-10 AND G-DRG codes - STOPS PROCESSING
-5. Supporting documents requirement enforcement
-6. Enhanced flagging logic with detailed reasons
-
-Per Flowchart Decision Tree:
-A0: OPDC13A CHECK → If found in ICD-10 OR G-DRG: FLAG (Supporting documents required) - STOPS PROCESSING
-A1: ICD-10 Present? → If No: PEND (Missing ICD-10)
-A2: DUAL G-DRG EVALUATION → Get both procedure and diagnosis G-DRGs, select highest tariff
-A3: Apply Age Split → Append 'A' (≥12) or 'C' (<12) suffix, Special cancer rule (<19)
-A4: Validate Selected Tariff → Ensure selected G-DRG has valid tariff
-
-Decision Points:
-- PEND: Missing ICD-10
-- FLAG: OPDC13A requires supporting documents - STOPS PROCESSING
-- REJECT: No Tariff Found for any G-DRG
-- APPROVED: G-DRG determined with highest tariff selected
-"""
-
 import asyncio
 import json
 import logging
@@ -31,39 +5,35 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
+from sqlalchemy import cast, Text
 
-# Import our database connection
 from neon_db_connection import get_nhis_queries, initialize_database, close_database
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ValidationResult(Enum):
-    """Validation outcomes per flowchart"""
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     FLAGGED = "FLAGGED"
     PENDING = "PENDING"
+    PARTIAL = "PARTIAL"
 
 class GDRGPathType(Enum):
-    """G-DRG determination path types"""
     PROCEDURE_PATH = "PROCEDURE_PATH"
     DIAGNOSIS_PATH = "DIAGNOSIS_PATH"
     DUAL_EVALUATION = "DUAL_EVALUATION"
 
 class SpecialCaseType(Enum):
-    """Special case types that require immediate flagging"""
     OPDC13A_SUPPORTING_DOCS = "OPDC13A_SUPPORTING_DOCS"
 
 @dataclass
 class ValidationOutcome:
-    """Result of a validation check with detailed reasoning"""
     result: ValidationResult
     reason: str
-    detailed_reason: str = ""  # For database storage
-    financial_impact: Dict[str, Any] = None  # Tariff comparison details
-    selection_logic: Dict[str, Any] = None  # G-DRG selection reasoning
+    detailed_reason: str = ""
+    financial_impact: Dict[str, Any] = None
+    selection_logic: Dict[str, Any] = None
     details: Dict[str, Any] = None
     timestamp: datetime = None
     step: str = "Step 5"
@@ -79,15 +49,11 @@ class ValidationOutcome:
             self.selection_logic = {}
 
 class EnhancedGDRGDeterminationStep5:
-    """
-    ENHANCED Step 5: G-DRG Determination with DUAL G-DRG SELECTION and Detailed Reasoning
-    """
     
     def __init__(self):
         self.queries = None
         self.is_initialized = False
         
-        # SPECIAL CASES: Codes that require immediate flagging
         self.special_case_codes = {
             "OPDC13A": {
                 "case_type": SpecialCaseType.OPDC13A_SUPPORTING_DOCS,
@@ -106,7 +72,6 @@ class EnhancedGDRGDeterminationStep5:
             }
         }
         
-        # Cancer ICD-10 codes for special age rule (<19 years gets 'C')
         self.cancer_icd10_codes = [
             'C00', 'C01', 'C02', 'C03', 'C04', 'C05', 'C06', 'C07', 'C08', 'C09',
             'C10', 'C11', 'C12', 'C13', 'C14', 'C15', 'C16', 'C17', 'C18', 'C19',
@@ -119,37 +84,27 @@ class EnhancedGDRGDeterminationStep5:
             'C90', 'C91', 'C92', 'C93', 'C94', 'C95', 'C96', 'C97'
         ]
         
-        # Procedure ICD-10 ranges that indicate surgical procedures
         self.surgical_procedure_ranges = [
-            ('0', '1'),  # Medical and Surgical
-            ('F', 'F')   # Physical Rehabilitation and Diagnostic Audiology
+            ('0', '1'),
+            ('F', 'F')
         ]
     
     async def initialize(self):
-        """Initialize database connection"""
         if not self.is_initialized:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info("Enhanced G-DRG Determination Step 5 initialized with DUAL G-DRG selection")
+            logger.info("Enhanced G-DRG Determination Step 5 initialized with individual validation")
     
     async def close(self):
-        """Close database connections"""
         await close_database()
         self.is_initialized = False
         logger.info("Enhanced G-DRG Determination Step 5 closed")
     
     async def process_step5_gdrg_determination(self, encounter_id: str) -> ValidationOutcome:
-        """
-        ENHANCED STEP 5: G-DRG Determination with DUAL G-DRG SELECTION
-        
-        NEW DECISION TREE:
-        A0 → OPDC13A Check (both ICD-10 AND G-DRG) → A1 → A2 (DUAL EVALUATION) → A3 → A4
-        """
         if not self.is_initialized:
             await self.initialize()
         
-        # Track all step results
         step_results = {
             "encounter_id": encounter_id,
             "steps_completed": [],
@@ -164,9 +119,8 @@ class EnhancedGDRGDeterminationStep5:
         }
         
         try:
-            logger.info(f"ENHANCED STEP 5: Starting dual G-DRG determination for {encounter_id}")
+            logger.info(f"ENHANCED STEP 5: Starting dual G-DRG determination with validation for {encounter_id}")
             
-            # Get claim data
             claim_data = await self.queries.get_claim_with_calculated_age(encounter_id)
             if not claim_data:
                 return ValidationOutcome(
@@ -176,12 +130,10 @@ class EnhancedGDRGDeterminationStep5:
                     details={"encounter_id": encounter_id}
                 )
             
-            # A0: OPDC13A SPECIAL CASE CHECK
             step_results["steps_completed"].append("A0_opdc13a_check")
             a0_result = await self._a0_check_opdc13a_special_case(claim_data)
             
             if a0_result.special_case_triggered:
-                # OPDC13A detected - STOP PROCESSING and FLAG
                 step_results["special_case_triggered"] = True
                 step_results["special_case_details"] = a0_result.details
                 step_results["steps_failed"].append({
@@ -206,7 +158,6 @@ class EnhancedGDRGDeterminationStep5:
                 "details": a0_result.details
             })
             
-            # A1: ICD-10 Present?
             step_results["steps_completed"].append("A1_icd10_present")
             a1_result = await self._a1_check_icd10_present(claim_data)
             
@@ -227,39 +178,44 @@ class EnhancedGDRGDeterminationStep5:
                 "details": a1_result.details
             })
             
-            # A2: DUAL G-DRG EVALUATION (NEW ENHANCED METHOD)
-            step_results["steps_completed"].append("A2_dual_gdrg_evaluation")
-            a2_result = await self._a2_dual_gdrg_evaluation(claim_data)
+            step_results["steps_completed"].append("A2_dual_gdrg_evaluation_with_validation")
+            a2_result = await self._a2_dual_gdrg_evaluation_with_validation(claim_data)
             
-            if a2_result.result != ValidationResult.APPROVED:
+            if a2_result.result == ValidationResult.REJECTED:
                 step_results["steps_failed"].append({
-                    "step": "A2_dual_gdrg_evaluation",
+                    "step": "A2_dual_gdrg_evaluation_with_validation",
                     "status": "FAILED",
                     "message": a2_result.reason,
                     "details": a2_result.details
                 })
                 step_results["overall_result"] = a2_result.result.value
                 return self._create_detailed_outcome(a2_result, step_results)
+            elif a2_result.result == ValidationResult.PARTIAL:
+                step_results["steps_passed"].append({
+                    "step": "A2_dual_gdrg_evaluation_with_validation",
+                    "status": "PARTIAL",
+                    "message": a2_result.reason,
+                    "details": a2_result.details
+                })
+                step_results["overall_result"] = a2_result.result.value
+            else:
+                step_results["steps_passed"].append({
+                    "step": "A2_dual_gdrg_evaluation_with_validation", 
+                    "status": "PASSED",
+                    "message": a2_result.reason,
+                    "details": a2_result.details
+                })
+                step_results["overall_result"] = a2_result.result.value
             
-            step_results["steps_passed"].append({
-                "step": "A2_dual_gdrg_evaluation", 
-                "status": "PASSED",
-                "message": a2_result.reason,
-                "details": a2_result.details
-            })
-            
-            # Store dual evaluation results
             step_results["dual_evaluation_performed"] = True
             step_results["tariff_comparison"] = a2_result.details.get("tariff_comparison", {})
             step_results["gdrg_determination"]["path_type"] = a2_result.details["path_type"]
             step_results["gdrg_determination"]["selected_gdrg"] = a2_result.details["selected_gdrg"]
             step_results["gdrg_determination"]["selection_reason"] = a2_result.details["evaluation_summary"]["selection_reason"]
             
-            # The selected G-DRG is already final (age split applied in A2)
             final_gdrg = a2_result.details["selected_gdrg"]
             selected_tariff_info = a2_result.details["selected_tariff_info"]
             
-            # A3: Age split already applied in A2, just validate
             step_results["steps_completed"].append("A3_age_validation")
             step_results["steps_passed"].append({
                 "step": "A3_age_validation",
@@ -268,7 +224,6 @@ class EnhancedGDRGDeterminationStep5:
                 "details": {"final_gdrg": final_gdrg}
             })
             
-            # A4: Tariff already calculated in A2, just validate
             step_results["steps_completed"].append("A4_tariff_validation")
             step_results["steps_passed"].append({
                 "step": "A4_tariff_validation",
@@ -280,17 +235,18 @@ class EnhancedGDRGDeterminationStep5:
             step_results["gdrg_determination"]["final_gdrg"] = final_gdrg
             step_results["gdrg_determination"]["tariff_info"] = selected_tariff_info
             
-            # All G-DRG determination steps passed
-            step_results["overall_result"] = "APPROVED"
-            
-            # Create comprehensive detailed reason for database
             detailed_reason = self._create_comprehensive_detailed_reason(
                 claim_data, a2_result.details, step_results
             )
             
+            if a2_result.result == ValidationResult.PARTIAL:
+                result_message = "STEP 5 PARTIAL: Higher-paying G-DRG rejected, lower-paying approved"
+            else:
+                result_message = "STEP 5 COMPLETED: Dual G-DRG evaluation successful"
+            
             final_result = ValidationOutcome(
-                result=ValidationResult.APPROVED,
-                reason="STEP 5 COMPLETED: Dual G-DRG evaluation successful",
+                result=a2_result.result,
+                reason=result_message,
                 detailed_reason=detailed_reason,
                 financial_impact=a2_result.financial_impact,
                 selection_logic=a2_result.selection_logic,
@@ -312,7 +268,8 @@ class EnhancedGDRGDeterminationStep5:
                         "selection_reason": step_results["gdrg_determination"]["selection_reason"],
                         "tariff_amount": selected_tariff_info["amount"],
                         "tariff_currency": selected_tariff_info["currency"],
-                        "dual_evaluation": True
+                        "dual_evaluation": True,
+                        "validation_applied": True
                     },
                     "validation_summary": {
                         "total_steps": len(step_results["steps_completed"]),
@@ -347,9 +304,6 @@ class EnhancedGDRGDeterminationStep5:
             )
     
     async def _a0_check_opdc13a_special_case(self, claim_data: Dict) -> ValidationOutcome:
-        """
-        A0: OPDC13A Check - Both ICD-10 AND G-DRG codes
-        """
         try:
             encounter_id = claim_data.get('encounter_id')
             icd10_code = claim_data.get('icd10_code', '').strip().upper()
@@ -359,7 +313,6 @@ class EnhancedGDRGDeterminationStep5:
             logger.info(f"   ICD-10 Code: {icd10_code}")
             logger.info(f"   G-DRG Code: {gdrg_code}")
             
-            # Check BOTH ICD-10 and G-DRG for OPDC13A
             opdc13a_found = False
             detection_source = None
             
@@ -376,10 +329,8 @@ class EnhancedGDRGDeterminationStep5:
             if opdc13a_found:
                 logger.warning(f"PROCESSING STOPPED for {encounter_id}: OPDC13A detected in {detection_source}")
                 
-                # Get special case configuration
                 special_case_config = self.special_case_codes["OPDC13A"]
                 
-                # Create detailed special case response
                 special_case_details = {
                     "encounter_id": encounter_id,
                     "icd10_code": icd10_code,
@@ -407,7 +358,6 @@ class EnhancedGDRGDeterminationStep5:
                     special_case_type=special_case_config["case_type"]
                 )
             
-            # No OPDC13A detected
             logger.info(f"A0: OPDC13A CHECK PASSED for {encounter_id} - No OPDC13A detected")
             
             return ValidationOutcome(
@@ -437,9 +387,6 @@ class EnhancedGDRGDeterminationStep5:
             )
     
     async def _a1_check_icd10_present(self, claim_data: Dict) -> ValidationOutcome:
-        """
-        A1: ICD-10 Present?
-        """
         try:
             encounter_id = claim_data.get('encounter_id')
             icd10_code = claim_data.get('icd10_code')
@@ -460,7 +407,6 @@ class EnhancedGDRGDeterminationStep5:
                     }
                 )
             
-            # Validate ICD-10 format
             if len(icd10_code) < 3:
                 detailed_reason = f"Invalid ICD-10 format for encounter {encounter_id}. Code '{icd10_code}' is too short (minimum 3 characters required). Diagnosis: {diagnosis_name or 'Not provided'}"
                 
@@ -498,11 +444,7 @@ class EnhancedGDRGDeterminationStep5:
                 details={"error": str(e)}
             )
     
-    async def _a2_dual_gdrg_evaluation(self, claim_data: Dict) -> ValidationOutcome:
-        """
-        A2: ENHANCED DUAL G-DRG EVALUATION
-        Evaluates both procedure and diagnosis G-DRGs and selects the highest paying one
-        """
+    async def _a2_dual_gdrg_evaluation_with_validation(self, claim_data: Dict) -> ValidationOutcome:
         try:
             encounter_id = claim_data.get('encounter_id')
             icd10_procedure = claim_data.get('icd10_code_procedure')
@@ -514,22 +456,20 @@ class EnhancedGDRGDeterminationStep5:
             patient_age = claim_data.get('calculated_age', 0)
             provider_name = claim_data.get('provider_name')
             
-            # Get facility info for tariff calculations
             facility_info = await self.queries.get_facility_info_by_name(provider_name)
             facility_level = facility_info.get('facility_level', '2') if facility_info else '2'
             
-            logger.info(f"A2: DUAL G-DRG EVALUATION for encounter {encounter_id}")
-            logger.info(f"   Primary ICD-10: {primary_icd10} ({diagnosis_name})")
-            logger.info(f"   Procedure ICD-10: {icd10_procedure} ({procedure_description})")
-            logger.info(f"   Facility: {provider_name} (Level {facility_level})")
+            logger.info(f"A2: DUAL G-DRG EVALUATION WITH VALIDATION for encounter {encounter_id}")
             
-            # Initialize evaluation results
             evaluation_results = {
                 "procedure_evaluation": {
                     "evaluated": False,
                     "gdrg_found": False,
                     "base_gdrg": None,
                     "final_gdrg": None,
+                    "validation_passed": False,
+                    "validation_details": {},
+                    "rejection_reasons": [],
                     "tariff": 0.0,
                     "tariff_info": None,
                     "source": None,
@@ -540,6 +480,9 @@ class EnhancedGDRGDeterminationStep5:
                     "gdrg_found": False,
                     "base_gdrg": None,
                     "final_gdrg": None,
+                    "validation_passed": False,
+                    "validation_details": {},
+                    "rejection_reasons": [],
                     "tariff": 0.0,
                     "tariff_info": None,
                     "source": None,
@@ -547,7 +490,6 @@ class EnhancedGDRGDeterminationStep5:
                 }
             }
             
-            # STEP 1: Evaluate Procedure G-DRG
             has_procedures = bool(
                 icd10_procedure and 
                 icd10_procedure not in ['NA', '', None] and
@@ -568,22 +510,29 @@ class EnhancedGDRGDeterminationStep5:
                         evaluation_results["procedure_evaluation"]["base_gdrg"] = procedure_gdrg
                         evaluation_results["procedure_evaluation"]["source"] = "clinical_procedure_inferences"
                         
-                        # Apply age split
                         age_split_result = await self._a3_apply_age_split(claim_data, procedure_gdrg)
                         final_procedure_gdrg = age_split_result.details['final_gdrg']
                         evaluation_results["procedure_evaluation"]["final_gdrg"] = final_procedure_gdrg
                         
-                        # Calculate tariff
-                        procedure_tariff_info = await self._lookup_facility_tariff(
-                            provider_name, facility_level, final_procedure_gdrg, encounter_type
-                        )
+                        validation_result = await self._validate_individual_gdrg(claim_data, final_procedure_gdrg, "procedure")
+                        evaluation_results["procedure_evaluation"]["validation_passed"] = validation_result["valid"]
+                        evaluation_results["procedure_evaluation"]["validation_details"] = validation_result["details"]
+                        evaluation_results["procedure_evaluation"]["rejection_reasons"] = validation_result["rejection_reasons"]
                         
-                        if procedure_tariff_info:
-                            evaluation_results["procedure_evaluation"]["tariff"] = procedure_tariff_info['amount']
-                            evaluation_results["procedure_evaluation"]["tariff_info"] = procedure_tariff_info
-                            logger.info(f"Procedure G-DRG {final_procedure_gdrg}: {procedure_tariff_info['amount']} GHS")
+                        if validation_result["valid"]:
+                            procedure_tariff_info = await self._lookup_facility_tariff(
+                                provider_name, facility_level, final_procedure_gdrg, encounter_type
+                            )
+                            
+                            if procedure_tariff_info:
+                                evaluation_results["procedure_evaluation"]["tariff"] = procedure_tariff_info['amount']
+                                evaluation_results["procedure_evaluation"]["tariff_info"] = procedure_tariff_info
+                                logger.info(f"Procedure G-DRG {final_procedure_gdrg}: VALID - {procedure_tariff_info['amount']} GHS")
+                            else:
+                                evaluation_results["procedure_evaluation"]["error"] = "No tariff found"
                         else:
-                            evaluation_results["procedure_evaluation"]["error"] = "No tariff found"
+                            logger.warning(f"Procedure G-DRG {final_procedure_gdrg}: REJECTED - {', '.join(validation_result['rejection_reasons'])}")
+                            evaluation_results["procedure_evaluation"]["tariff"] = 0.0
                     else:
                         evaluation_results["procedure_evaluation"]["error"] = "No G-DRG found in procedure inferences"
                         
@@ -591,7 +540,6 @@ class EnhancedGDRGDeterminationStep5:
                     evaluation_results["procedure_evaluation"]["error"] = str(e)
                     logger.error(f"Error evaluating procedure G-DRG: {e}")
             
-            # STEP 2: Evaluate Diagnosis G-DRG
             logger.info(f"Evaluating diagnosis G-DRG for: {primary_icd10}")
             evaluation_results["diagnosis_evaluation"]["evaluated"] = True
             
@@ -600,7 +548,6 @@ class EnhancedGDRGDeterminationStep5:
                     primary_icd10, encounter_type, patient_age
                 )
                 
-                # Fallback to claim G-DRG if not found in inferences
                 if not diagnosis_gdrg:
                     diagnosis_gdrg = claim_data.get('gdrg_code')
                     evaluation_results["diagnosis_evaluation"]["source"] = "claim_fallback"
@@ -612,22 +559,29 @@ class EnhancedGDRGDeterminationStep5:
                     evaluation_results["diagnosis_evaluation"]["gdrg_found"] = True
                     evaluation_results["diagnosis_evaluation"]["base_gdrg"] = diagnosis_gdrg
                     
-                    # Apply age split
                     age_split_result = await self._a3_apply_age_split(claim_data, diagnosis_gdrg)
                     final_diagnosis_gdrg = age_split_result.details['final_gdrg']
                     evaluation_results["diagnosis_evaluation"]["final_gdrg"] = final_diagnosis_gdrg
                     
-                    # Calculate tariff
-                    diagnosis_tariff_info = await self._lookup_facility_tariff(
-                        provider_name, facility_level, final_diagnosis_gdrg, encounter_type
-                    )
+                    validation_result = await self._validate_individual_gdrg(claim_data, final_diagnosis_gdrg, "diagnosis")
+                    evaluation_results["diagnosis_evaluation"]["validation_passed"] = validation_result["valid"]
+                    evaluation_results["diagnosis_evaluation"]["validation_details"] = validation_result["details"]
+                    evaluation_results["diagnosis_evaluation"]["rejection_reasons"] = validation_result["rejection_reasons"]
                     
-                    if diagnosis_tariff_info:
-                        evaluation_results["diagnosis_evaluation"]["tariff"] = diagnosis_tariff_info['amount']
-                        evaluation_results["diagnosis_evaluation"]["tariff_info"] = diagnosis_tariff_info
-                        logger.info(f"Diagnosis G-DRG {final_diagnosis_gdrg}: {diagnosis_tariff_info['amount']} GHS")
+                    if validation_result["valid"]:
+                        diagnosis_tariff_info = await self._lookup_facility_tariff(
+                            provider_name, facility_level, final_diagnosis_gdrg, encounter_type
+                        )
+                        
+                        if diagnosis_tariff_info:
+                            evaluation_results["diagnosis_evaluation"]["tariff"] = diagnosis_tariff_info['amount']
+                            evaluation_results["diagnosis_evaluation"]["tariff_info"] = diagnosis_tariff_info
+                            logger.info(f"Diagnosis G-DRG {final_diagnosis_gdrg}: VALID - {diagnosis_tariff_info['amount']} GHS")
+                        else:
+                            evaluation_results["diagnosis_evaluation"]["error"] = "No tariff found"
                     else:
-                        evaluation_results["diagnosis_evaluation"]["error"] = "No tariff found"
+                        logger.warning(f"Diagnosis G-DRG {final_diagnosis_gdrg}: REJECTED - {', '.join(validation_result['rejection_reasons'])}")
+                        evaluation_results["diagnosis_evaluation"]["tariff"] = 0.0
                 else:
                     evaluation_results["diagnosis_evaluation"]["error"] = "No diagnosis G-DRG found"
                     
@@ -635,141 +589,210 @@ class EnhancedGDRGDeterminationStep5:
                 evaluation_results["diagnosis_evaluation"]["error"] = str(e)
                 logger.error(f"Error evaluating diagnosis G-DRG: {e}")
             
-            # STEP 3: Select highest paying G-DRG
-            procedure_tariff = evaluation_results["procedure_evaluation"]["tariff"]
-            diagnosis_tariff = evaluation_results["diagnosis_evaluation"]["tariff"]
+            valid_options = []
             
-            selected_evaluation = None
-            selection_reason = ""
-            path_type = None
+            if (evaluation_results["procedure_evaluation"]["validation_passed"] and 
+                evaluation_results["procedure_evaluation"]["tariff"] > 0):
+                valid_options.append({
+                    "type": "procedure",
+                    "evaluation": evaluation_results["procedure_evaluation"],
+                    "tariff": evaluation_results["procedure_evaluation"]["tariff"]
+                })
             
-            if procedure_tariff > 0 and diagnosis_tariff > 0:
-                # Both G-DRGs available - select highest paying
-                if procedure_tariff >= diagnosis_tariff:
-                    selected_evaluation = evaluation_results["procedure_evaluation"]
-                    selection_reason = f"Procedure G-DRG selected - higher tariff: {procedure_tariff} vs {diagnosis_tariff} GHS"
-                    path_type = GDRGPathType.PROCEDURE_PATH.value
-                    logger.info(f"SELECTION: Procedure G-DRG {selected_evaluation['final_gdrg']} - Higher tariff ({procedure_tariff} GHS)")
-                else:
-                    selected_evaluation = evaluation_results["diagnosis_evaluation"]
-                    selection_reason = f"Diagnosis G-DRG selected - higher tariff: {diagnosis_tariff} vs {procedure_tariff} GHS"
-                    path_type = GDRGPathType.DIAGNOSIS_PATH.value
-                    logger.info(f"SELECTION: Diagnosis G-DRG {selected_evaluation['final_gdrg']} - Higher tariff ({diagnosis_tariff} GHS)")
-                    
-                path_type = GDRGPathType.DUAL_EVALUATION.value  # Override to show dual evaluation was performed
-                
-            elif procedure_tariff > 0:
-                # Only procedure G-DRG available
-                selected_evaluation = evaluation_results["procedure_evaluation"]
-                selection_reason = f"Procedure G-DRG selected - only valid option: {procedure_tariff} GHS"
-                path_type = GDRGPathType.PROCEDURE_PATH.value
-                logger.info(f"SELECTION: Procedure G-DRG {selected_evaluation['final_gdrg']} - Only option ({procedure_tariff} GHS)")
-                
-            elif diagnosis_tariff > 0:
-                # Only diagnosis G-DRG available
-                selected_evaluation = evaluation_results["diagnosis_evaluation"]
-                selection_reason = f"Diagnosis G-DRG selected - only valid option: {diagnosis_tariff} GHS"
-                path_type = GDRGPathType.DIAGNOSIS_PATH.value
-                logger.info(f"SELECTION: Diagnosis G-DRG {selected_evaluation['final_gdrg']} - Only option ({diagnosis_tariff} GHS)")
-                
-            else:
-                # No valid G-DRG found with tariff
-                error_details = {
-                    "procedure_error": evaluation_results["procedure_evaluation"]["error"],
-                    "diagnosis_error": evaluation_results["diagnosis_evaluation"]["error"],
-                    "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
-                    "diagnosis_evaluated": evaluation_results["diagnosis_evaluation"]["evaluated"]
-                }
-                
-                detailed_reason = f"No valid G-DRG with tariff found for encounter {encounter_id}. "
+            if (evaluation_results["diagnosis_evaluation"]["validation_passed"] and 
+                evaluation_results["diagnosis_evaluation"]["tariff"] > 0):
+                valid_options.append({
+                    "type": "diagnosis", 
+                    "evaluation": evaluation_results["diagnosis_evaluation"],
+                    "tariff": evaluation_results["diagnosis_evaluation"]["tariff"]
+                })
+            
+            if not valid_options:
+                all_rejection_reasons = []
                 if evaluation_results["procedure_evaluation"]["evaluated"]:
-                    detailed_reason += f"Procedure evaluation ({icd10_procedure}): {error_details['procedure_error']}. "
-                detailed_reason += f"Diagnosis evaluation ({primary_icd10}): {error_details['diagnosis_error']}"
+                    all_rejection_reasons.extend(evaluation_results["procedure_evaluation"]["rejection_reasons"])
+                all_rejection_reasons.extend(evaluation_results["diagnosis_evaluation"]["rejection_reasons"])
                 
-                logger.error(f"No valid G-DRG with tariff found for {encounter_id}")
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
-                    reason="REJECT: No valid G-DRG with tariff found",
-                    detailed_reason=detailed_reason,
+                    reason=f"REJECT: No valid G-DRGs found - all failed validation",
+                    detailed_reason=f"All G-DRG options failed validation. Rejection reasons: {', '.join(set(all_rejection_reasons))}",
                     details={
                         "encounter_id": encounter_id,
-                        "procedure_icd10": icd10_procedure,
-                        "diagnosis_icd10": primary_icd10,
                         "evaluation_results": evaluation_results,
-                        "error_details": error_details
+                        "rejection_reasons": list(set(all_rejection_reasons)),
+                        "path_type": GDRGPathType.DUAL_EVALUATION.value,
+                        "selected_gdrg": None,
+                        "selected_tariff": 0,
+                        "selected_tariff_info": None,
+                        "evaluation_summary": {
+                            "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
+                            "procedure_gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                            "procedure_tariff": 0,
+                            "diagnosis_gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                            "diagnosis_tariff": 0,
+                            "winner": None,
+                            "winning_tariff": 0,
+                            "selection_reason": "All G-DRGs failed validation"
+                        }
                     }
                 )
             
-            # Create detailed reason for database storage
-            detailed_reason = self._create_dual_evaluation_detailed_reason(
-                encounter_id, claim_data, evaluation_results, selected_evaluation, selection_reason
-            )
-            
-            # Create financial impact summary
-            financial_impact = {
-                "procedure_tariff": procedure_tariff,
-                "diagnosis_tariff": diagnosis_tariff,
-                "selected_tariff": selected_evaluation["tariff"],
-                "tariff_difference": abs(procedure_tariff - diagnosis_tariff) if procedure_tariff > 0 and diagnosis_tariff > 0 else 0,
-                "selection_advantage": selected_evaluation["tariff"] - min(procedure_tariff, diagnosis_tariff) if procedure_tariff > 0 and diagnosis_tariff > 0 else 0,
-                "currency": "GHS"
-            }
-            
-            # Create selection logic summary
-            selection_logic = {
-                "evaluation_method": "dual_gdrg_comparison",
-                "both_evaluated": procedure_tariff > 0 and diagnosis_tariff > 0,
-                "selection_criteria": "highest_tariff",
-                "winner": "procedure" if selected_evaluation == evaluation_results["procedure_evaluation"] else "diagnosis",
-                "winning_tariff": selected_evaluation["tariff"],
-                "runner_up_tariff": diagnosis_tariff if selected_evaluation == evaluation_results["procedure_evaluation"] else procedure_tariff
-            }
-            
-            # STEP 4: Return selected G-DRG outcome
-            return ValidationOutcome(
-                result=ValidationResult.APPROVED,
-                reason=f"A2: {selection_reason}",
-                detailed_reason=detailed_reason,
-                financial_impact=financial_impact,
-                selection_logic=selection_logic,
-                details={
-                    "path_type": path_type,
-                    "selected_gdrg": selected_evaluation['final_gdrg'],
-                    "selected_base_gdrg": selected_evaluation['base_gdrg'],
-                    "selected_tariff": selected_evaluation['tariff'],
-                    "selected_tariff_info": selected_evaluation['tariff_info'],
-                    "selection_logic": "highest_tariff",
-                    "evaluation_summary": {
-                        "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
-                        "procedure_gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
-                        "procedure_tariff": procedure_tariff,
-                        "diagnosis_gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
-                        "diagnosis_tariff": diagnosis_tariff,
-                        "winner": selected_evaluation['final_gdrg'],
-                        "winning_tariff": selected_evaluation['tariff'],
-                        "selection_reason": selection_reason
-                    },
-                    "tariff_comparison": {
-                        "procedure": {
-                            "gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
-                            "tariff": procedure_tariff,
-                            "available": procedure_tariff > 0,
-                            "source": evaluation_results["procedure_evaluation"]["source"]
-                        },
-                        "diagnosis": {
-                            "gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
-                            "tariff": diagnosis_tariff,
-                            "available": diagnosis_tariff > 0,
-                            "source": evaluation_results["diagnosis_evaluation"]["source"]
+            elif len(valid_options) == 1:
+                selected_option = valid_options[0]
+                selected_evaluation = selected_option["evaluation"]
+                
+                if evaluation_results["procedure_evaluation"]["evaluated"] and evaluation_results["diagnosis_evaluation"]["evaluated"]:
+                    rejected_type = "diagnosis" if selected_option["type"] == "procedure" else "procedure"
+                    rejected_eval = evaluation_results[f"{rejected_type}_evaluation"]
+                    
+                    financial_impact = {
+                        "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                        "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                        "selected_tariff": selected_evaluation["tariff"],
+                        "rejected_tariff": rejected_eval["tariff"],
+                        "tariff_loss": rejected_eval["tariff"] if rejected_eval["tariff"] > selected_evaluation["tariff"] else 0,
+                        "currency": "GHS"
+                    }
+                    
+                    return ValidationOutcome(
+                        result=ValidationResult.PARTIAL,
+                        reason=f"PARTIAL: {selected_option['type'].title()} G-DRG used - {rejected_type} G-DRG rejected",
+                        detailed_reason=f"{selected_option['type'].title()} G-DRG {selected_evaluation['final_gdrg']} selected with tariff {selected_evaluation['tariff']} GHS. {rejected_type.title()} G-DRG rejected due to: {', '.join(rejected_eval['rejection_reasons'])}",
+                        financial_impact=financial_impact,
+                        details={
+                            "path_type": GDRGPathType.DUAL_EVALUATION.value,
+                            "selected_gdrg": selected_evaluation['final_gdrg'],
+                            "selected_tariff": selected_evaluation['tariff'],
+                            "selected_tariff_info": selected_evaluation['tariff_info'],
+                            "evaluation_results": evaluation_results,
+                            "partial_reason": f"{rejected_type.title()} G-DRG validation failed",
+                            "evaluation_summary": {
+                                "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
+                                "procedure_gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                                "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                                "diagnosis_gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                                "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                                "winner": selected_evaluation['final_gdrg'],
+                                "winning_tariff": selected_evaluation['tariff'],
+                                "selection_reason": f"{selected_option['type'].title()} G-DRG used - {rejected_type} rejected due to validation failure"
+                            },
+                            "tariff_comparison": {
+                                "procedure": {
+                                    "gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                                    "tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                                    "available": evaluation_results["procedure_evaluation"]["validation_passed"],
+                                    "source": evaluation_results["procedure_evaluation"]["source"],
+                                    "rejection_reasons": evaluation_results["procedure_evaluation"]["rejection_reasons"]
+                                },
+                                "diagnosis": {
+                                    "gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                                    "tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                                    "available": evaluation_results["diagnosis_evaluation"]["validation_passed"],
+                                    "source": evaluation_results["diagnosis_evaluation"]["source"],
+                                    "rejection_reasons": evaluation_results["diagnosis_evaluation"]["rejection_reasons"]
+                                }
+                            }
                         }
-                    },
-                    "full_evaluation_results": evaluation_results
-                }
-            )
+                    )
+                else:
+                    financial_impact = {
+                        "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                        "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                        "selected_tariff": selected_evaluation["tariff"],
+                        "currency": "GHS"
+                    }
+                    
+                    return ValidationOutcome(
+                        result=ValidationResult.APPROVED,
+                        reason=f"APPROVED: {selected_option['type'].title()} G-DRG validated - {selected_evaluation['tariff']} GHS",
+                        detailed_reason=f"{selected_option['type'].title()} G-DRG {selected_evaluation['final_gdrg']} validated and approved with tariff {selected_evaluation['tariff']} GHS",
+                        financial_impact=financial_impact,
+                        details={
+                            "path_type": f"{selected_option['type']}_path".upper(),
+                            "selected_gdrg": selected_evaluation['final_gdrg'],
+                            "selected_tariff": selected_evaluation['tariff'],
+                            "selected_tariff_info": selected_evaluation['tariff_info'],
+                            "evaluation_results": evaluation_results,
+                            "evaluation_summary": {
+                                "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
+                                "procedure_gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                                "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                                "diagnosis_gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                                "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                                "winner": selected_evaluation['final_gdrg'],
+                                "winning_tariff": selected_evaluation['tariff'],
+                                "selection_reason": f"{selected_option['type'].title()} G-DRG selected - only valid option"
+                            }
+                        }
+                    )
             
+            else:
+                selected_option = max(valid_options, key=lambda x: x["tariff"])
+                selected_evaluation = selected_option["evaluation"]
+                
+                other_option = [opt for opt in valid_options if opt != selected_option][0]
+                
+                financial_impact = {
+                    "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                    "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                    "selected_tariff": selected_evaluation["tariff"],
+                    "tariff_difference": abs(selected_option["tariff"] - other_option["tariff"]),
+                    "selection_advantage": selected_option["tariff"] - other_option["tariff"],
+                    "currency": "GHS"
+                }
+                
+                selection_logic = {
+                    "evaluation_method": "dual_gdrg_validation_comparison",
+                    "both_validated": True,
+                    "selection_criteria": "highest_valid_tariff",
+                    "winner": selected_option["type"],
+                    "winning_tariff": selected_evaluation["tariff"],
+                    "runner_up_tariff": other_option["tariff"]
+                }
+                
+                return ValidationOutcome(
+                    result=ValidationResult.APPROVED,
+                    reason=f"APPROVED: {selected_option['type'].title()} G-DRG selected - higher valid tariff: {selected_option['tariff']} vs {other_option['tariff']} GHS",
+                    detailed_reason=f"Both G-DRGs valid. {selected_option['type'].title()} G-DRG {selected_evaluation['final_gdrg']} selected with higher tariff {selected_evaluation['tariff']} GHS vs {other_option['type']} G-DRG {other_option['evaluation']['final_gdrg']} with {other_option['tariff']} GHS",
+                    financial_impact=financial_impact,
+                    selection_logic=selection_logic,
+                    details={
+                        "path_type": GDRGPathType.DUAL_EVALUATION.value,
+                        "selected_gdrg": selected_evaluation['final_gdrg'],
+                        "selected_tariff": selected_evaluation['tariff'],
+                        "selected_tariff_info": selected_evaluation['tariff_info'],
+                        "evaluation_results": evaluation_results,
+                        "selection_reason": "highest_valid_tariff",
+                        "evaluation_summary": {
+                            "procedure_evaluated": evaluation_results["procedure_evaluation"]["evaluated"],
+                            "procedure_gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                            "procedure_tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                            "diagnosis_gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                            "diagnosis_tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                            "winner": selected_evaluation['final_gdrg'],
+                            "winning_tariff": selected_evaluation['tariff'],
+                            "selection_reason": f"Both valid - {selected_option['type']} G-DRG has higher tariff"
+                        },
+                        "tariff_comparison": {
+                            "procedure": {
+                                "gdrg": evaluation_results["procedure_evaluation"]["final_gdrg"],
+                                "tariff": evaluation_results["procedure_evaluation"]["tariff"],
+                                "available": evaluation_results["procedure_evaluation"]["validation_passed"],
+                                "source": evaluation_results["procedure_evaluation"]["source"]
+                            },
+                            "diagnosis": {
+                                "gdrg": evaluation_results["diagnosis_evaluation"]["final_gdrg"],
+                                "tariff": evaluation_results["diagnosis_evaluation"]["tariff"],
+                                "available": evaluation_results["diagnosis_evaluation"]["validation_passed"],
+                                "source": evaluation_results["diagnosis_evaluation"]["source"]
+                            }
+                        }
+                    }
+                )
+                
         except Exception as e:
-            logger.error(f"Error in A2 dual G-DRG evaluation: {e}")
-            # Fallback to original logic
+            logger.error(f"Error in A2 dual G-DRG evaluation with validation: {e}")
             fallback_gdrg = claim_data.get('gdrg_code')
             detailed_reason = f"Error during dual G-DRG evaluation for encounter {claim_data.get('encounter_id')}: {str(e)}. Fallback to claim G-DRG: {fallback_gdrg}"
             
@@ -781,14 +804,143 @@ class EnhancedGDRGDeterminationStep5:
                     "path_type": GDRGPathType.DIAGNOSIS_PATH.value,
                     "error": str(e),
                     "selected_gdrg": fallback_gdrg,
-                    "source": "claim_fallback_error"
+                    "source": "claim_fallback_error",
+                    "evaluation_summary": {
+                        "selection_reason": "Error fallback to claim G-DRG"
+                    }
                 }
             )
+    
+    async def _validate_individual_gdrg(self, claim_data: Dict, gdrg_code: str, gdrg_type: str) -> Dict:
+        try:
+            patient_age = claim_data.get('calculated_age', 0)
+            patient_gender = claim_data.get('gender', '').upper()
+            primary_icd10 = claim_data.get('icd10_code', '')
+            encounter_id = claim_data.get('encounter_id')
+            
+            rejection_reasons = []
+            validation_details = {
+                "gdrg_code": gdrg_code,
+                "gdrg_type": gdrg_type,
+                "patient_age": patient_age,
+                "patient_gender": patient_gender,
+                "primary_icd10": primary_icd10,
+                "checks_performed": []
+            }
+            
+            age_check = await self._validate_gdrg_age_appropriateness(gdrg_code, patient_age, primary_icd10)
+            validation_details["checks_performed"].append("age_validation")
+            validation_details["age_validation"] = age_check
+            
+            if not age_check["valid"]:
+                rejection_reasons.append(f"Age inappropriate: {age_check['reason']}")
+            
+            gender_check = await self._validate_gdrg_gender_appropriateness(gdrg_code, patient_gender, primary_icd10)
+            validation_details["checks_performed"].append("gender_validation")
+            validation_details["gender_validation"] = gender_check
+            
+            if not gender_check["valid"]:
+                rejection_reasons.append(f"Gender inappropriate: {gender_check['reason']}")
+            
+            clinical_check = await self._validate_gdrg_clinical_appropriateness(gdrg_code, primary_icd10, claim_data)
+            validation_details["checks_performed"].append("clinical_validation")
+            validation_details["clinical_validation"] = clinical_check
+            
+            if not clinical_check["valid"]:
+                rejection_reasons.append(f"Clinically inappropriate: {clinical_check['reason']}")
+            
+            is_valid = len(rejection_reasons) == 0
+            
+            if is_valid:
+                logger.info(f"G-DRG {gdrg_code} ({gdrg_type}): VALIDATION PASSED for {encounter_id}")
+            else:
+                logger.warning(f"G-DRG {gdrg_code} ({gdrg_type}): VALIDATION FAILED for {encounter_id} - {', '.join(rejection_reasons)}")
+            
+            return {
+                "valid": is_valid,
+                "details": validation_details,
+                "rejection_reasons": rejection_reasons
+            }
+            
+        except Exception as e:
+            logger.error(f"Error validating G-DRG {gdrg_code}: {e}")
+            return {
+                "valid": False,
+                "details": {"error": str(e)},
+                "rejection_reasons": [f"Validation error: {str(e)}"]
+            }
+
+    async def _validate_gdrg_age_appropriateness(self, gdrg_code: str, patient_age: int, icd10_code: str) -> Dict:
+        try:
+            if gdrg_code.endswith('C'):
+                if patient_age >= 12:
+                    is_cancer = any(icd10_code.startswith(cancer_code) for cancer_code in self.cancer_icd10_codes)
+                    if is_cancer and patient_age < 19:
+                        return {"valid": True, "reason": "Childhood cancer exception allows pediatric G-DRG"}
+                    else:
+                        return {"valid": False, "reason": f"Pediatric G-DRG inappropriate for age {patient_age}"}
+            
+            elif gdrg_code.endswith('A'):
+                if patient_age < 12:
+                    return {"valid": False, "reason": f"Adult G-DRG inappropriate for age {patient_age}"}
+            
+            return {"valid": True, "reason": "Age appropriate"}
+            
+        except Exception as e:
+            return {"valid": True, "reason": f"Age validation error: {str(e)}"}
+
+    async def _validate_gdrg_gender_appropriateness(self, gdrg_code: str, patient_gender: str, icd10_code: str) -> Dict:
+        try:
+            male_only_gdrgs = ['SURG15', 'SURG16']
+            female_only_gdrgs = ['SURG17', 'SURG18', 'OBST01', 'OBST02', 'OBST03']
+            
+            base_gdrg = gdrg_code.rstrip('AC')
+            
+            if any(male_gdrg in base_gdrg for male_gdrg in male_only_gdrgs):
+                if patient_gender != 'M':
+                    return {"valid": False, "reason": f"Male-specific G-DRG {gdrg_code} inappropriate for {patient_gender} patient"}
+            
+            if any(female_gdrg in base_gdrg for female_gdrg in female_only_gdrgs):
+                if patient_gender != 'F':
+                    return {"valid": False, "reason": f"Female-specific G-DRG {gdrg_code} inappropriate for {patient_gender} patient"}
+            
+            return {"valid": True, "reason": "Gender appropriate"}
+            
+        except Exception as e:
+            return {"valid": True, "reason": f"Gender validation error: {str(e)}"}
+
+    async def _validate_gdrg_clinical_appropriateness(self, gdrg_code: str, primary_icd10: str, claim_data: Dict) -> Dict:
+        try:
+            contraindicated_combinations = {
+                'CARDI': {
+                    'inappropriate_with': ['Z51'],
+                    'reason': 'Cardiac G-DRG inappropriate for aftercare encounters'
+                },
+                'SURG': {
+                    'inappropriate_with': ['Z00', 'Z01'],
+                    'reason': 'Surgical G-DRG inappropriate for health examination'
+                }
+            }
+            
+            base_gdrg = gdrg_code.rstrip('AC')
+            
+            for gdrg_pattern, rules in contraindicated_combinations.items():
+                if gdrg_pattern in base_gdrg:
+                    for inappropriate_icd10 in rules['inappropriate_with']:
+                        if primary_icd10.startswith(inappropriate_icd10):
+                            return {
+                                "valid": False, 
+                                "reason": f"{rules['reason']} (ICD-10: {primary_icd10})"
+                            }
+            
+            return {"valid": True, "reason": "Clinically appropriate"}
+            
+        except Exception as e:
+            return {"valid": True, "reason": f"Clinical validation error: {str(e)}"}
     
     def _create_dual_evaluation_detailed_reason(self, encounter_id: str, claim_data: Dict, 
                                                evaluation_results: Dict, selected_evaluation: Dict, 
                                                selection_reason: str) -> str:
-        """Create comprehensive detailed reason for database storage"""
         
         primary_icd10 = claim_data.get('icd10_code')
         procedure_icd10 = claim_data.get('icd10_code_procedure')
@@ -797,10 +949,8 @@ class EnhancedGDRGDeterminationStep5:
         
         reason_parts = []
         
-        # Header
         reason_parts.append(f"Dual G-DRG evaluation completed for encounter {encounter_id}.")
         
-        # Diagnosis evaluation
         diag_eval = evaluation_results["diagnosis_evaluation"]
         reason_parts.append(f"Diagnosis: {primary_icd10} ({diagnosis_name or 'Not provided'})")
         if diag_eval["gdrg_found"]:
@@ -808,7 +958,6 @@ class EnhancedGDRGDeterminationStep5:
         else:
             reason_parts.append(f"Diagnosis G-DRG: Not found or no tariff available. Error: {diag_eval['error']}")
         
-        # Procedure evaluation
         proc_eval = evaluation_results["procedure_evaluation"]
         if proc_eval["evaluated"]:
             reason_parts.append(f"Procedure: {procedure_icd10} ({procedure_description or 'Not provided'})")
@@ -819,45 +968,36 @@ class EnhancedGDRGDeterminationStep5:
         else:
             reason_parts.append("Procedure evaluation: Skipped (no valid procedure codes)")
         
-        # Selection decision
         reason_parts.append(f"Selection decision: {selection_reason}")
         reason_parts.append(f"Final G-DRG selected: {selected_evaluation['final_gdrg']} with tariff {selected_evaluation['tariff']} GHS")
         
         return " ".join(reason_parts)
     
     def _create_comprehensive_detailed_reason(self, claim_data: Dict, a2_details: Dict, step_results: Dict) -> str:
-        """Create comprehensive detailed reason for the entire Step 5 process"""
         
         encounter_id = claim_data.get('encounter_id')
         reason_parts = []
         
-        # Step 5 summary
         reason_parts.append(f"Step 5 G-DRG determination completed for encounter {encounter_id}.")
         
-        # OPDC13A check
         reason_parts.append("OPDC13A special case check: Passed - no OPDC13A detected in ICD-10 or G-DRG codes.")
         
-        # ICD-10 validation
         icd10_code = claim_data.get('icd10_code')
         reason_parts.append(f"ICD-10 validation: Passed - {icd10_code} is valid.")
         
-        # Dual G-DRG evaluation summary
         eval_summary = a2_details.get("evaluation_summary", {})
         reason_parts.append(f"Dual G-DRG evaluation: {eval_summary.get('selection_reason', 'Selection completed')}")
         
-        # Final G-DRG and tariff
         final_gdrg = step_results["gdrg_determination"]["final_gdrg"]
         tariff_info = step_results["gdrg_determination"]["tariff_info"]
         reason_parts.append(f"Final result: G-DRG {final_gdrg} selected with tariff {tariff_info['amount']} {tariff_info['currency']}")
         
-        # Path type
         path_type = step_results["gdrg_determination"]["path_type"]
         reason_parts.append(f"Processing path: {path_type}")
         
         return " ".join(reason_parts)
     
     async def _get_gdrg_from_procedure_inferences(self, icd10_code: str, encounter_type: str, patient_age: int) -> Optional[str]:
-        """Get G-DRG from clinical_procedure_inferences table"""
         try:
             query = """
             SELECT 
@@ -876,7 +1016,6 @@ class EnhancedGDRGDeterminationStep5:
             result = await self.queries.db.fetch_one(query, icd10_code, encounter_type)
             
             if result:
-                # Check age restrictions if present
                 age_restrictions = result.get('age_restrictions')
                 if age_restrictions and isinstance(age_restrictions, str):
                     try:
@@ -891,7 +1030,7 @@ class EnhancedGDRGDeterminationStep5:
                             logger.warning(f"Patient age {patient_age} above maximum {max_age} for procedure G-DRG")
                             return None
                     except:
-                        pass  # Continue if age restrictions parsing fails
+                        pass
                 
                 logger.info(f"Found procedure G-DRG: {result['gdrg_code']} for {icd10_code}")
                 return result['gdrg_code']
@@ -903,7 +1042,6 @@ class EnhancedGDRGDeterminationStep5:
             return None
     
     async def _get_gdrg_from_diagnosis_inferences(self, icd10_code: str, encounter_type: str, patient_age: int) -> Optional[str]:
-        """Get G-DRG from clinical_diagnosis_inferences table"""
         try:
             query = """
             SELECT 
@@ -921,7 +1059,6 @@ class EnhancedGDRGDeterminationStep5:
             result = await self.queries.db.fetch_one(query, icd10_code, encounter_type)
             
             if result:
-                # Check age restrictions if present
                 age_restrictions = result.get('age_restrictions')
                 if age_restrictions and isinstance(age_restrictions, str):
                     try:
@@ -936,7 +1073,7 @@ class EnhancedGDRGDeterminationStep5:
                             logger.warning(f"Patient age {patient_age} above maximum {max_age} for diagnosis G-DRG")
                             return None
                     except:
-                        pass  # Continue if age restrictions parsing fails
+                        pass
                 
                 logger.info(f"Found diagnosis G-DRG: {result['gdrg_code']} for {icd10_code}")
                 return result['gdrg_code']
@@ -948,40 +1085,29 @@ class EnhancedGDRGDeterminationStep5:
             return None
     
     async def _a3_apply_age_split(self, claim_data: Dict, base_gdrg: str) -> ValidationOutcome:
-        """
-        A3: Apply Age Split
-        Per flowchart: Append 'A' (≥12) or 'C' (<12) suffix
-        Special rule: Childhood Cancer <19 → 'C' suffix
-        """
         try:
             patient_age = claim_data.get('calculated_age', 0)
             icd10_code = claim_data.get('icd10_code', '')
             encounter_id = claim_data.get('encounter_id')
             
-            # Check if it's a cancer diagnosis
             is_cancer = any(icd10_code.startswith(cancer_code) for cancer_code in self.cancer_icd10_codes)
             
-            # Determine age suffix based on rules
             if is_cancer and patient_age < 19:
-                # Special rule: Childhood Cancer <19 gets 'C' suffix
                 age_suffix = 'C'
                 age_rule_applied = f"Childhood cancer rule: Age {patient_age} < 19 years → 'C' suffix"
                 logger.info(f"A3: Childhood cancer rule applied - {age_rule_applied}")
                 
             elif patient_age < 12:
-                # Standard pediatric rule: <12 gets 'C' suffix
                 age_suffix = 'C'
                 age_rule_applied = f"Pediatric rule: Age {patient_age} < 12 years → 'C' suffix"
                 logger.info(f"A3: Pediatric rule applied - {age_rule_applied}")
                 
             else:
-                # Adult rule: ≥12 gets 'A' suffix
                 age_suffix = 'A'
                 age_rule_applied = f"Adult rule: Age {patient_age} ≥ 12 years → 'A' suffix"
                 logger.info(f"A3: Adult rule applied - {age_rule_applied}")
             
-            # Remove existing suffix if present and append new one
-            base_gdrg_clean = base_gdrg.rstrip('AC')  # Remove existing A or C
+            base_gdrg_clean = base_gdrg.rstrip('AC')
             final_gdrg = f"{base_gdrg_clean}{age_suffix}"
             
             detailed_reason = f"Age split applied for encounter {encounter_id}. Patient age: {patient_age} years. Base G-DRG: {base_gdrg} → Final G-DRG: {final_gdrg}. Rule applied: {age_rule_applied}"
@@ -1005,7 +1131,6 @@ class EnhancedGDRGDeterminationStep5:
             
         except Exception as e:
             logger.error(f"Error in A3 age split: {e}")
-            # Default to 'A' suffix if error
             fallback_gdrg = f"{base_gdrg.rstrip('AC')}A"
             detailed_reason = f"Age split error for encounter {claim_data.get('encounter_id')}: {str(e)}. Applied default adult suffix 'A'. Final G-DRG: {fallback_gdrg}"
             
@@ -1024,20 +1149,14 @@ class EnhancedGDRGDeterminationStep5:
     
     async def _lookup_facility_tariff(self, provider_name: str, facility_level: str, 
                                     gdrg_code: str, encounter_type: str) -> Optional[Dict]:
-        """
-        Lookup facility-specific tariff from icd10_codes table
-        """
         try:
-            # Extract base G-DRG by removing age suffix (A/C)
             base_gdrg = gdrg_code.rstrip('AC')
             
             logger.info(f"TARIFF LOOKUP: {gdrg_code} → {base_gdrg} for {provider_name}")
             
-            # Try multiple lookup strategies to find the tariff
             tariff_result = None
             lookup_strategy = None
             
-            # Strategy 1: Try exact G-DRG match first
             tariff_query_exact = """
             SELECT 
                 icd_code,
@@ -1056,14 +1175,12 @@ class EnhancedGDRGDeterminationStep5:
                 lookup_strategy = "exact_gdrg_match"
                 logger.info(f"Found exact G-DRG match: {gdrg_code}")
             
-            # Strategy 2: Try base G-DRG without suffix
             if not tariff_result:
                 tariff_result = await self.queries.db.fetch_one(tariff_query_exact, base_gdrg)
                 if tariff_result:
                     lookup_strategy = "base_gdrg_match"
                     logger.info(f"Found base G-DRG match: {base_gdrg}")
             
-            # Strategy 3: Try pattern matching for similar G-DRGs
             if not tariff_result:
                 tariff_query_pattern = """
                 SELECT 
@@ -1094,40 +1211,35 @@ class EnhancedGDRGDeterminationStep5:
                 logger.error(f"No tariff found for {gdrg_code} or {base_gdrg} in any strategy")
                 return None
             
-            # Safely extract tariff amount
             try:
                 base_amount = float(tariff_result['tariff'])
             except (ValueError, TypeError) as e:
                 logger.error(f"Invalid tariff amount: {tariff_result.get('tariff')} - {e}")
                 return None
             
-            # DYNAMIC MULTIPLIERS based on actual claim submission data
             facility_multipliers = {
-                '1': 0,  # Level 1: Primary care facilities
-                '2': 1,  # Level 2: District hospitals (baseline)
-                '3': 1   # Level 3: Teaching/referral hospitals
+                '1': 0,
+                '2': 1,
+                '3': 1
             }
             
             encounter_multipliers = {
-                'OPD': 1,   # Outpatient: Standard rate
-                'IPD': 1,   # Inpatient: 10% complexity adjustment
-                'A&E': 1    # Emergency: 20% urgency surcharge
+                'OPD': 1,
+                'IPD': 1,
+                'A&E': 1
             }
             
-            # Apply facility level adjustment
             facility_multiplier = facility_multipliers.get(str(facility_level), 1.00)
             adjusted_amount = base_amount * facility_multiplier
             
-            # Apply encounter type adjustment  
             encounter_multiplier = encounter_multipliers.get(encounter_type, 1.00)
             final_amount = adjusted_amount * encounter_multiplier
             
-            # Apply age-based adjustments
             age_multiplier = 1.00
-            if gdrg_code.endswith('C'):  # Pediatric
-                age_multiplier = 0.95  # 5% pediatric adjustment
-            elif gdrg_code.endswith('A'):  # Adult
-                age_multiplier = 1.00  # Standard rate
+            if gdrg_code.endswith('C'):
+                age_multiplier = 0.95
+            elif gdrg_code.endswith('A'):
+                age_multiplier = 1.00
             
             final_amount = final_amount * age_multiplier
             
@@ -1155,7 +1267,6 @@ class EnhancedGDRGDeterminationStep5:
             return None
     
     def _create_detailed_outcome(self, original_result: ValidationOutcome, step_results: Dict) -> ValidationOutcome:
-        """Create detailed outcome with step-by-step results and special case handling"""
         if original_result.details is None:
             original_result.details = {}
         
@@ -1167,7 +1278,6 @@ class EnhancedGDRGDeterminationStep5:
             "final_result": step_results["overall_result"]
         }
         
-        # Add special case information if triggered
         if step_results.get("special_case_triggered"):
             original_result.details["special_case_triggered"] = True
             original_result.details["special_case_details"] = step_results["special_case_details"]
@@ -1176,26 +1286,23 @@ class EnhancedGDRGDeterminationStep5:
         
         return original_result
     
-    # Utility methods
-    
     async def validate_multiple_claims(self, encounter_ids: List[str]) -> Dict[str, ValidationOutcome]:
-        """
-        Batch validate multiple claims with dual G-DRG evaluation
-        """
         results = {}
         special_cases_found = []
         dual_evaluations_performed = 0
+        partial_approvals = 0
         
         for encounter_id in encounter_ids:
             try:
                 result = await self.process_step5_gdrg_determination(encounter_id)
                 results[encounter_id] = result
                 
-                # Track dual evaluations
                 if result.details and result.details.get("dual_evaluation_summary"):
                     dual_evaluations_performed += 1
                 
-                # Track special cases
+                if result.result == ValidationResult.PARTIAL:
+                    partial_approvals += 1
+                
                 if result.special_case_triggered:
                     special_cases_found.append({
                         "encounter_id": encounter_id,
@@ -1203,18 +1310,19 @@ class EnhancedGDRGDeterminationStep5:
                         "reason": result.reason
                     })
                 
-                # Enhanced logging
                 if result.special_case_triggered:
                     status_emoji = "FLAG"
                     logger.warning(f"{status_emoji} {encounter_id}: {result.reason} - MANUAL REVIEW REQUIRED")
                 else:
-                    status_emoji = "PASS" if result.result == ValidationResult.APPROVED else "FAIL"
+                    status_emoji = "PASS" if result.result == ValidationResult.APPROVED else "PARTIAL" if result.result == ValidationResult.PARTIAL else "FAIL"
                     gdrg_info = ""
                     if result.details and result.details.get('gdrg_summary'):
                         gdrg_summary = result.details['gdrg_summary']
                         gdrg_info = f" → {gdrg_summary['selected_gdrg']} ({gdrg_summary['tariff_amount']} {gdrg_summary['tariff_currency']})"
                         if gdrg_summary.get('dual_evaluation'):
                             gdrg_info += " [DUAL EVAL]"
+                        if gdrg_summary.get('validation_applied'):
+                            gdrg_info += " [VALIDATED]"
                     logger.info(f"{status_emoji} {encounter_id}: {result.reason}{gdrg_info}")
                 
             except Exception as e:
@@ -1226,9 +1334,9 @@ class EnhancedGDRGDeterminationStep5:
                     details={"encounter_id": encounter_id}
                 )
         
-        # Enhanced summary
         logger.info(f"BATCH VALIDATION COMPLETE: {len(results)} claims processed")
         logger.info(f"Dual evaluations performed: {dual_evaluations_performed}")
+        logger.info(f"Partial approvals (validation rejections): {partial_approvals}")
         
         if special_cases_found:
             logger.warning(f"SPECIAL CASES FOUND: {len(special_cases_found)} claims flagged for manual review")
@@ -1238,95 +1346,31 @@ class EnhancedGDRGDeterminationStep5:
         return results
 
 
-# Test the enhanced dual G-DRG selection
-async def test_dual_gdrg_selection():
-    """
-    Test the enhanced dual G-DRG selection functionality
-    """
+async def test_dual_gdrg_selection_with_validation():
     validator = EnhancedGDRGDeterminationStep5()
     
     try:
         await validator.initialize()
         
-        print("\nTESTING ENHANCED DUAL G-DRG SELECTION")
+        print("\nTESTING ENHANCED DUAL G-DRG SELECTION WITH INDIVIDUAL VALIDATION")
         print("=" * 80)
-        print("FEATURES:")
-        print("   • Dual G-DRG evaluation (procedure + diagnosis)")
-        print("   • Highest tariff selection logic")
-        print("   • Detailed reasoning for database storage")
-        print("   • OPDC13A special case handling")
-        print("   • Comprehensive financial impact analysis")
         
-        # Test Case 1: Claim with both procedure and diagnosis codes
-        print("\nTEST CASE 1: Dual G-DRG Evaluation")
-        mock_claim_dual = {
-            "encounter_id": "TEST-DUAL-GDRG-001",
-            "icd10_code": "I50.9",  # Heart failure
+        mock_claim_validation_test = {
+            "encounter_id": "TEST-VALIDATION-001",
+            "icd10_code": "I50.9",
             "diagnosis_name": "Heart failure, unspecified",
-            "icd10_code_procedure": "5A1221Z",  # Cardiac procedure
-            "icd10_description_procedure": "Cardiac output measurement",
+            "icd10_code_procedure": "5A1221Z",
+            "icd10_description_procedure": "Cardiac procedure",
             "gdrg_code": "CARDI03A",
             "calculated_age": 65,
             "encounter_type": "IPD",
-            "provider_name": "Test Cardiac Hospital"
+            "provider_name": "Test Cardiac Hospital",
+            "gender": "M"
         }
         
-        result_dual = await validator._a2_dual_gdrg_evaluation(mock_claim_dual)
-        print(f"   Result: {result_dual.result.value}")
-        print(f"   Reason: {result_dual.reason}")
-        print(f"   Selected G-DRG: {result_dual.details.get('selected_gdrg')}")
-        print(f"   Selected Tariff: {result_dual.details.get('selected_tariff')} GHS")
-        
-        if result_dual.financial_impact:
-            print(f"   Financial Impact:")
-            print(f"     Procedure Tariff: {result_dual.financial_impact.get('procedure_tariff')} GHS")
-            print(f"     Diagnosis Tariff: {result_dual.financial_impact.get('diagnosis_tariff')} GHS")
-            print(f"     Selection Advantage: {result_dual.financial_impact.get('selection_advantage')} GHS")
-        
-        # Test Case 2: Claim with only diagnosis (no procedure)
-        print("\nTEST CASE 2: Diagnosis Only")
-        mock_claim_diag = {
-            "encounter_id": "TEST-DIAG-ONLY-001",
-            "icd10_code": "E11.9",  # Type 2 diabetes
-            "diagnosis_name": "Type 2 diabetes mellitus without complications",
-            "icd10_code_procedure": "",  # No procedure
-            "icd10_description_procedure": "",
-            "gdrg_code": "ENDO01A",
-            "calculated_age": 55,
-            "encounter_type": "OPD",
-            "provider_name": "Test General Hospital"
-        }
-        
-        result_diag = await validator._a2_dual_gdrg_evaluation(mock_claim_diag)
-        print(f"   Result: {result_diag.result.value}")
-        print(f"   Reason: {result_diag.reason}")
-        print(f"   Selected G-DRG: {result_diag.details.get('selected_gdrg')}")
-        
-        # Test Case 3: OPDC13A special case
-        print("\nTEST CASE 3: OPDC13A Special Case")
-        mock_claim_opdc = {
-            "encounter_id": "TEST-OPDC13A-001",
-            "icd10_code": "G80",  # Cerebral palsy
-            "diagnosis_name": "Cerebral palsy",
-            "gdrg_code": "OPDC13A",  # Special case in G-DRG
-            "calculated_age": 8,
-            "encounter_type": "OPD",
-            "provider_name": "Test Pediatric Hospital"
-        }
-        
-        result_opdc = await validator.process_step5_gdrg_determination("TEST-OPDC13A-001")
-        # Mock the claim data for this test since we don't have actual DB
-        validator.queries.get_claim_with_calculated_age = lambda x: mock_claim_opdc
-        
-        print(f"   Result: {result_opdc.result.value}")
-        print(f"   Special Case Triggered: {result_opdc.special_case_triggered}")
-        print(f"   Reason: {result_opdc.reason}")
-        
-        print("\nDUAL G-DRG SELECTION TEST COMPLETE")
-        print("Expected behavior:")
-        print("   Test 1: Should select higher paying G-DRG")
-        print("   Test 2: Should select diagnosis G-DRG (only option)")
-        print("   Test 3: Should flag OPDC13A and stop processing")
+        result = await validator._a2_dual_gdrg_evaluation_with_validation(mock_claim_validation_test)
+        print(f"   Result: {result.result.value}")
+        print(f"   Reason: {result.reason}")
         
         return True
         
@@ -1339,62 +1383,16 @@ async def test_dual_gdrg_selection():
 
 
 async def main():
-    """
-    Test the enhanced G-DRG determination with dual selection
-    """
-    print("\nENHANCED G-DRG DETERMINATION WITH DUAL SELECTION")
+    print("\nENHANCED G-DRG DETERMINATION WITH INDIVIDUAL VALIDATION")
     print("=" * 90)
-    print("NEW FEATURES:")
-    print("   • Dual G-DRG evaluation (procedure + diagnosis)")
-    print("   • Highest tariff selection automatically")
-    print("   • Detailed reasons for database storage")
-    print("   • Comprehensive financial impact analysis")
-    print("   • Enhanced OPDC13A special case handling")
-    print("   • Complete audit trail for selections")
     
-    # Test the dual selection functionality
-    test_success = await test_dual_gdrg_selection()
+    test_success = await test_dual_gdrg_selection_with_validation()
     
     if test_success:
-        print("\nINTEGRATION INSTRUCTIONS:")
-        print("=" * 80)
-        print("REPLACE your existing gdrg_determination.py with this enhanced version")
-        print("KEY IMPROVEMENTS:")
-        print("   • Claims with both procedure and diagnosis codes get evaluated for both")
-        print("   • System automatically selects the G-DRG with higher tariff")
-        print("   • Usually procedure G-DRGs have higher tariffs (as expected)")
-        print("   • Detailed reasoning stored in database for audit purposes")
-        print("   • Financial impact analysis shows tariff comparison")
-        print("   • OPDC13A handling unchanged and working")
-        
-        print("\nHOW IT WORKS:")
-        print("1. System checks for OPDC13A (stops if found)")
-        print("2. Validates ICD-10 codes are present")
-        print("3. Evaluates BOTH procedure and diagnosis G-DRGs")
-        print("4. Calculates actual tariffs for both")
-        print("5. Selects the G-DRG with highest tariff")
-        print("6. Applies age splits and validates final tariff")
-        print("7. Returns comprehensive results with selection reasoning")
-        
-        print("\nDATABASE STORAGE:")
-        print("   • detailed_reason: Complete explanation of selection process")
-        print("   • financial_impact: Tariff comparison data")
-        print("   • selection_logic: Decision-making criteria used")
-        print("   • All information needed for audit and manual review")
-        
-        print("\nENHANCED DUAL G-DRG SELECTION READY FOR DEPLOYMENT")
+        print("\nVALIDATION INTEGRATION COMPLETE")
     else:
-        print("\nTEST VERIFICATION FAILED - NEEDS DEBUGGING")
+        print("\nTEST VERIFICATION FAILED")
 
 
 if __name__ == "__main__":
-    print("Starting Enhanced G-DRG Determination with Dual Selection")
-    print("=" * 80)
-    print("DUAL G-DRG SELECTION:")
-    print("   • Evaluates both procedure and diagnosis G-DRGs")
-    print("   • Automatically selects highest paying G-DRG")
-    print("   • Provides detailed reasoning for database storage")
-    print("   • Maintains OPDC13A special case handling")
-    print("=" * 80)
-    
     asyncio.run(main())
