@@ -171,7 +171,7 @@ class MedicineValidationStep6:
             
             medicines = medicines_check.details['medicines']
             
-            # Process each medicine individually
+            
             medicine_individual_results = []
             approved_medicines = []
             partial_medicines = []
@@ -194,7 +194,7 @@ class MedicineValidationStep6:
 
             total_medicine_cost_rejected = sum(med['cost'] for med in rejected_medicines)
             
-            # Store detailed results
+            
             step_results["medicine_results"] = {
                 "approved": approved_medicines,
                 "partial": partial_medicines,
@@ -209,7 +209,7 @@ class MedicineValidationStep6:
                 "total_cost": total_medicine_cost_approved + total_medicine_cost_rejected
             }
             
-            # Create medicine outcomes for compatibility
+            
             medicine_outcomes = []
             for result in medicine_individual_results:
                 medicine_outcomes.append({
@@ -223,9 +223,9 @@ class MedicineValidationStep6:
                     "tariff_calculation": result['tariff_calculation']
                 })
             
-            # Determine overall result based on individual medicine results
+            
             if rejected_medicines and not approved_medicines and not partial_medicines:
-                # All medicines rejected - collect specific reasons
+                
                 specific_reasons = []
                 primary_reason = None
                 
@@ -235,7 +235,7 @@ class MedicineValidationStep6:
                         if not primary_reason:
                             primary_reason = med['rejection_reason']
                 
-                # Get the most common reason or use the first one
+                
                 if specific_reasons:
                     from collections import Counter
                     reason_counts = Counter(specific_reasons)
@@ -278,7 +278,7 @@ class MedicineValidationStep6:
                 )
             
             elif rejected_medicines and (approved_medicines or partial_medicines):
-                # Partial approval - collect rejection reasons for rejected medicines
+                
                 specific_reasons = []
                 for med in rejected_medicines:
                     if med.get('rejection_reason'):
@@ -376,14 +376,22 @@ class MedicineValidationStep6:
             )
 
     async def _process_individual_medicine(self, medicine: Dict, claim_data: Dict, encounter_id: str) -> Dict:
-        """Process a single medicine individually and return its result"""
+        
         try:
             medicine_code = medicine['medicine_code']
+
+            logger.info(f"="*50)
+            logger.info(f"Processing medicine: {medicine_code}")
+            logger.info(f"Medicine name: {medicine.get('medicine_name')}")
+            logger.info(f"Prescribed dosage: {medicine.get('prescribed_dosage')}")
+            logger.info(f"Frequency: {medicine.get('frequency')}")
+            logger.info(f"Duration: {medicine.get('duration_days')} days")
+            logger.info(f"="*50)
             
             
             individual_issues = []
             
-            # Check admission period for this medicine
+            
             admission_check = await self._check_medicine_admission_period(claim_data, [medicine])
             if not admission_check['valid']:
                 individual_issues.append({
@@ -392,7 +400,7 @@ class MedicineValidationStep6:
                     'details': admission_check
                 })
             
-            # Check duplicates for this medicine
+            
             duplicate_check = await self._check_duplicate_medicine_claims(claim_data, [medicine])
             if not duplicate_check['valid']:
                 individual_issues.append({
@@ -401,7 +409,7 @@ class MedicineValidationStep6:
                     'details': duplicate_check
                 })
             
-            # Check gender appropriateness
+            
             gender_check = await self._check_gender_diagnosis_mismatch(claim_data)
             if not gender_check['valid']:
                 individual_issues.append({
@@ -410,7 +418,7 @@ class MedicineValidationStep6:
                     'details': gender_check
                 })
             
-            # Check age appropriateness for this medicine
+           
             age_check = await self._check_age_medicine_appropriateness(claim_data, [medicine])
             if not age_check['valid']:
                 individual_issues.append({
@@ -419,7 +427,7 @@ class MedicineValidationStep6:
                     'details': age_check
                 })
             
-            # Check prescription appropriateness for this medicine
+            
             prescription_check = await self._check_inappropriate_prescription(claim_data, [medicine])
             if not prescription_check['valid']:
                 individual_issues.append({
@@ -428,7 +436,7 @@ class MedicineValidationStep6:
                     'details': prescription_check
                 })
             
-            # If there are critical issues, reject this medicine
+            
             if individual_issues:
                 primary_issue = individual_issues[0]
                 return {
@@ -454,7 +462,7 @@ class MedicineValidationStep6:
                     }
                 }
             
-            # Check formulary for this medicine
+            
             formulary_check = await self._validate_formulary([medicine], encounter_id)
             if formulary_check.result == ValidationResult.REJECTED:
                 return {
@@ -479,7 +487,7 @@ class MedicineValidationStep6:
                     }
                 }
             
-            # Check prescriber level for this medicine
+            
             prescriber_check = await self._check_prescriber_level([medicine], claim_data['prescriber_level'])
             if prescriber_check.result != ValidationResult.APPROVED:
                 return {
@@ -504,7 +512,7 @@ class MedicineValidationStep6:
                     }
                 }
             
-            # Validate dosage and calculate cost
+            
             tariff_info = await self._get_medicine_tariff(medicine_code)
             standard_dosage_info = await self._get_standard_dosage_info(medicine_code)
             
@@ -512,7 +520,7 @@ class MedicineValidationStep6:
                 medicine, standard_dosage_info, tariff_info, encounter_id
             )
             
-            # Determine final status and cost based on dosage result
+            
             if dosage_result == DosageResult.WITHIN_LIMITS:
                 final_status = 'APPROVED'
                 final_cost = calculated_tariff.get('total_cost', 0.0)
@@ -523,8 +531,8 @@ class MedicineValidationStep6:
                 rejection_reason = None
             elif dosage_result == DosageResult.EXCESSIVE_OVERSUPPLY:
                 final_status = 'REJECTED'
-                final_cost = 0.0  # Set to 0 for rejected medicines
-                # GET THE SPECIFIC REJECTION REASON FROM calculated_tariff
+                final_cost = 0.0
+                
                 rejection_reason = calculated_tariff.get('validation_result', 'Medicine validation failed')
             else:
                 final_status = 'APPROVED'
@@ -538,7 +546,7 @@ class MedicineValidationStep6:
                 'frequency': medicine.get('frequency', ''),
                 'duration_days': medicine.get('duration_days', 0),
                 'final_status': final_status,
-                'rejection_reason': rejection_reason,  # Now uses the specific reason
+                'rejection_reason': rejection_reason,
                 'cost': final_cost,
                 'dosage_result': dosage_result.value,
                 'validation_details': self._get_dosage_validation_details(medicine, dosage_result, standard_dosage_info),
@@ -573,7 +581,7 @@ class MedicineValidationStep6:
         try:
             medicines = []
             
-            if claim_data.get('medicine_code') and claim_data['medicine_code'] not in ['NA', '', None]:
+            if claim_data.get('medicine_code') and claim_data['medicine_code'] not in ['NA', '', None, 'nan']:
                 medicines.append({
                     'medicine_code': claim_data['medicine_code'],
                     'medicine_name': claim_data.get('medicine_name', ''),
@@ -582,7 +590,7 @@ class MedicineValidationStep6:
                     'duration_days': claim_data.get('duration_days', 0)
                 })
             
-            if claim_data.get('medicine_code_procedure') and claim_data['medicine_code_procedure'] not in ['NA', '', None]:
+            if claim_data.get('medicine_code_procedure') and claim_data['medicine_code_procedure'] not in ['NA', '', None, 'nan']:
                 medicines.append({
                     'medicine_code': claim_data['medicine_code_procedure'],
                     'medicine_name': claim_data.get('medicine_name_procedure', ''),
@@ -1555,6 +1563,7 @@ class MedicineValidationStep6:
             logger.error(f"Error in enhanced dosage validation: {e}")
             return DosageResult.WITHIN_LIMITS, "Validation error - defaulted to approved"
     
+
     def _calculate_simple_cost(self, dosage_result: DosageResult, frequency_multiplier: float,
                               duration_days: float, unit_price: float, medicine_code: str, 
                               prescribed_amount: float, standard_amount: float, tariff_unit_amount: float) -> float:

@@ -365,7 +365,7 @@ class AutomatedBatchProcessor:
     async def _run_batch_duplicate_detection(self, batch_id: str, encounter_ids: List[str], batch_info: BatchInfo):
         try:
             logger.info(f"DUPLICATE DETECTION: Starting for batch {batch_id} with {len(encounter_ids)} claims")
-            duplicate_report = await run_duplicate_detection_stage(encounter_ids)
+            duplicate_report = await run_duplicate_detection_stage(encounter_ids, batch_id)
 
             if "error" in duplicate_report:
                 logger.error(f"Duplicate detection failed for batch {batch_id}: {duplicate_report['error']}")
