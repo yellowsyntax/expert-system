@@ -1037,13 +1037,7 @@ class DuplicateClaimsDetector:
     
     async def _update_claims_schema_if_needed(self):
         try:
-            alter_queries = [
-                "ALTER TABLE claims_v3 ADD COLUMN IF NOT EXISTS processed_status VARCHAR(20) DEFAULT 'PENDING'",
-                "ALTER TABLE claims_v3 ADD COLUMN IF NOT EXISTS flag_reason JSONB",
-                "ALTER TABLE claims_v3 ADD COLUMN IF NOT EXISTS flagged_at TIMESTAMP",
-                "ALTER TABLE claims_v3 ADD COLUMN IF NOT EXISTS duplicate_count INTEGER DEFAULT 0",
-                "ALTER TABLE claims_v3 ADD COLUMN IF NOT EXISTS highest_duplicate_confidence DECIMAL(5,3) DEFAULT 0.000"
-            ]
+            alter_queries = []
             
             for query in alter_queries:
                 try:

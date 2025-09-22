@@ -1,19 +1,3 @@
-"""
-NHIS Expert System - Step 4: Facility Credentialing Validator
-Implements Step 4 from the flowchart: Credentialing & Level Check
-UPDATED: Completely data-driven, no hardcoding
-
-Validates:
-1. Get Facility Information 
-2. Check Facility Eligible for G-DRG?
-3. Check Accreditation Required?
-
-Decision Points:
-- REJECT: Facility Not Authorized for G-DRG
-- REJECT: Missing Required Accreditation  
-- APPROVED: Proceed to Step 5
-"""
-
 import asyncio
 import json
 import logging
@@ -21,24 +5,22 @@ from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from datetime import datetime
+from decimal import Decimal
 
-# Import our database connection
 from neon_db_connection import get_nhis_queries, initialize_database, close_database
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ValidationResult(Enum):
-    """Validation outcomes per flowchart"""
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     FLAGGED = "FLAGGED"
     PENDING = "PENDING"
+    PARTIAL = "PARTIAL"
 
 @dataclass
 class ValidationOutcome:
-    """Result of a validation check"""
     result: ValidationResult
     reason: str
     details: Dict[str, Any] = None
@@ -50,38 +32,63 @@ class ValidationOutcome:
             self.timestamp = datetime.now()
 
 class FacilityCredentialingValidator:
-    """
-    Step 4: Facility Credentialing & Level Check Validator
-    UPDATED: Completely data-driven validation using clinical inference data
-    """
     
     def __init__(self):
         self.queries = None
         self.is_initialized = False
     
     async def initialize(self):
-        """Initialize database connection"""
         if not self.is_initialized:
             await initialize_database()
             self.queries = await get_nhis_queries()
             self.is_initialized = True
-            logger.info(" Facility Credentialing Validator initialized (Data-Driven Mode)")
+            logger.info("Facility Credentialing Validator initialized")
     
     async def close(self):
-        """Close database connections"""
         await close_database()
         self.is_initialized = False
-        logger.info("🔌 Facility Credentialing Validator closed")
+        logger.info("Facility Credentialing Validator closed")
     
     async def process_step4_credentialing_check(self, encounter_id: str) -> ValidationOutcome:
-        """
-        STEP 4: Credentialing & Level Check (per flowchart)
-        UPDATED: Completely data-driven approach
-        """
         if not self.is_initialized:
             await self.initialize()
         
-        # Track all step results
+        try:
+            logger.info(f"STEP 4: Starting credentialing check for encounter {encounter_id}")
+            
+            claim = await self.queries.get_claim_with_calculated_age(encounter_id)
+            if not claim:
+                return ValidationOutcome(
+                    result=ValidationResult.REJECTED,
+                    reason="REJECT: Claim not found",
+                    details={"encounter_id": encounter_id}
+                )
+            
+            has_procedure = bool(
+                claim.get('icd10_code_procedure') and 
+                claim['icd10_code_procedure'] not in ['NA', '', None, 'nan', 'NaN', 'NAN'] and 
+                len(str(claim['icd10_code_procedure']).strip()) >= 3
+            )
+            
+            logger.info(f"Encounter {encounter_id}: Diagnosis={claim.get('icd10_code')}, Procedure={claim.get('icd10_code_procedure')}, Has_Procedure={has_procedure}")
+            
+            if not has_procedure:
+                logger.info(f"Single path validation for {encounter_id}")
+                return await self._validate_single_path(encounter_id, claim)
+            
+            logger.info(f"Dual path validation for {encounter_id}")
+            return await self._validate_dual_paths(encounter_id, claim)
+            
+        except Exception as e:
+            logger.error(f"Error in Step 4 credentialing check: {e}")
+            return ValidationOutcome(
+                result=ValidationResult.PENDING,
+                reason="PEND: System error during credentialing check",
+                details={"error": str(e), "encounter_id": encounter_id}
+            )
+    
+    async def _validate_single_path(self, encounter_id: str, claim: Dict) -> ValidationOutcome:
+        
         step_results = {
             "encounter_id": encounter_id,
             "steps_completed": [],
@@ -91,9 +98,6 @@ class FacilityCredentialingValidator:
         }
         
         try:
-            logger.info(f"🏥 STEP 4: Starting data-driven credentialing check for encounter {encounter_id}")
-            
-            # Sub-step 1: Get Facility Information from Claims Data
             step_results["steps_completed"].append("1_facility_information")
             facility_info_result = await self._get_facility_information_from_claims(encounter_id)
             
@@ -117,11 +121,11 @@ class FacilityCredentialingValidator:
                 step_results["overall_result"] = facility_info_result.result.value
                 return self._create_detailed_outcome(facility_info_result, step_results)
             
-            # Extract data for next checks
             claim_data = facility_info_result.details['claim_data']
             gdrg_code = claim_data['gdrg_code']
             
-            # Sub-step 2: Check Facility Level Eligible for G-DRG (Data-Driven)
+            logger.info(f"Single path G-DRG for {encounter_id}: {gdrg_code}")
+            
             step_results["steps_completed"].append("2_gdrg_level_eligibility")
             level_eligibility_result = await self._check_facility_level_gdrg_eligibility(claim_data, gdrg_code)
             
@@ -142,7 +146,6 @@ class FacilityCredentialingValidator:
                 step_results["overall_result"] = level_eligibility_result.result.value
                 return self._create_detailed_outcome(level_eligibility_result, step_results)
             
-            # Sub-step 3: Check Patient Age Requirements (Data-Driven)
             step_results["steps_completed"].append("3_age_requirements")
             age_check_result = await self._validate_patient_age_requirements(claim_data, gdrg_code)
             
@@ -163,7 +166,6 @@ class FacilityCredentialingValidator:
                 step_results["overall_result"] = age_check_result.result.value
                 return self._create_detailed_outcome(age_check_result, step_results)
             
-            # Sub-step 4: Check Gender Requirements (Data-Driven)
             step_results["steps_completed"].append("4_gender_requirements")
             gender_check_result = await self._validate_gender_requirements(claim_data, gdrg_code)
             
@@ -184,58 +186,171 @@ class FacilityCredentialingValidator:
                 step_results["overall_result"] = gender_check_result.result.value
                 return self._create_detailed_outcome(gender_check_result, step_results)
             
-            # All Step 4 checks passed
             step_results["overall_result"] = "APPROVED"
             
             final_result = ValidationOutcome(
                 result=ValidationResult.APPROVED,
-                reason="STEP 4 PASSED: Facility credentialing and level checks completed (Data-Driven)",
+                reason="STEP 4 PASSED: Facility credentialing and level checks completed",
                 details={
                     "encounter_id": encounter_id,
                     "provider_name": claim_data['provider_name'],
                     "facility_level": claim_data['healthcare_level'],
                     "gdrg_code": gdrg_code,
                     "gdrg_description": claim_data.get('gdrg_description'),
-                    "validation_approach": "data_driven_from_clinical_inferences",
+                    "validation_approach": "single_path_validation",
                     "next_step": "Step 5: G-DRG Determination",
-                    "step_by_step_results": step_results,
-                    "validation_summary": {
-                        "total_steps": len(step_results["steps_completed"]),
-                        "steps_passed": len(step_results["steps_passed"]),
-                        "steps_failed": len(step_results["steps_failed"]),
-                        "facility_info": " Found",
-                        "level_eligibility": " Authorized", 
-                        "age_requirements": " Met",
-                        "gender_requirements": " Met"
-                    }
-                }
-            )
-            
-            logger.info(f" STEP 4 PASSED (Data-Driven) for {encounter_id}: {claim_data['provider_name']} Level {claim_data['healthcare_level']}")
-            return final_result
-            
-        except Exception as e:
-            logger.error(f" Error in Step 4 credentialing check: {e}")
-            step_results["steps_failed"].append({
-                "step": "system_error",
-                "status": "ERROR",
-                "message": f"System error: {str(e)}",
-                "details": {"error_type": type(e).__name__}
-            })
-            step_results["overall_result"] = "PENDING"
-            
-            return ValidationOutcome(
-                result=ValidationResult.PENDING,
-                reason="PEND: System error during credentialing check",
-                details={
-                    "error": str(e), 
-                    "encounter_id": encounter_id,
                     "step_by_step_results": step_results
                 }
             )
+            
+            logger.info(f"STEP 4 PASSED for {encounter_id}: {claim_data['provider_name']} Level {claim_data['healthcare_level']}, G-DRG {gdrg_code}")
+            return final_result
+            
+        except Exception as e:
+            logger.error(f"Error in single path validation: {e}")
+            return ValidationOutcome(
+                result=ValidationResult.PENDING,
+                reason="PEND: System error during validation",
+                details={"error": str(e), "encounter_id": encounter_id}
+            )
+    
+    async def _validate_dual_paths(self, encounter_id: str, claim: Dict) -> ValidationOutcome:
+        
+        logger.info(f"=== DUAL PATH CREDENTIALING START for {encounter_id} ===")
+        
+        facility_check = await self._get_facility_information_from_claims(encounter_id)
+        if facility_check.result != ValidationResult.APPROVED:
+            logger.error(f"Facility check failed for {encounter_id}")
+            return facility_check
+        
+        claim_data = facility_check.details['claim_data']
+        
+        diagnosis_gdrg = claim_data.get('gdrg_code')
+        logger.info(f"Diagnosis G-DRG from claim: {diagnosis_gdrg}")
+        
+        procedure_gdrg = claim_data.get('gdrg_code_procedure')
+        logger.info(f"Procedure G-DRG from claim: {procedure_gdrg}")
+        
+        diagnosis_result = None
+        procedure_result = None
+        
+        if diagnosis_gdrg:
+            logger.info(f"--- Validating DIAGNOSIS path: {diagnosis_gdrg} ---")
+            diagnosis_result = await self._validate_gdrg_path(claim_data, diagnosis_gdrg, "diagnosis")
+            if diagnosis_result['valid']:
+                logger.info(f"✓ Diagnosis G-DRG {diagnosis_gdrg}: PASSED all checks")
+            else:
+                logger.warning(f"✗ Diagnosis G-DRG {diagnosis_gdrg}: FAILED - {diagnosis_result['reason']}")
+        
+        if procedure_gdrg:
+            logger.info(f"--- Validating PROCEDURE path: {procedure_gdrg} ---")
+            procedure_result = await self._validate_gdrg_path(claim_data, procedure_gdrg, "procedure")
+            if procedure_result['valid']:
+                logger.info(f"✓ Procedure G-DRG {procedure_gdrg}: PASSED all checks")
+            else:
+                logger.warning(f"✗ Procedure G-DRG {procedure_gdrg}: FAILED - {procedure_result['reason']}")
+        
+        approved_paths = []
+        rejected_paths = []
+        
+        if diagnosis_result and diagnosis_result['valid']:
+            approved_paths.append({"type": "diagnosis", "gdrg": diagnosis_gdrg})
+        elif diagnosis_result:
+            rejected_paths.append({"type": "diagnosis", "gdrg": diagnosis_gdrg, "reason": diagnosis_result['reason']})
+        
+        if procedure_result and procedure_result['valid']:
+            approved_paths.append({"type": "procedure", "gdrg": procedure_gdrg})
+        elif procedure_result:
+            rejected_paths.append({"type": "procedure", "gdrg": procedure_gdrg, "reason": procedure_result['reason']})
+        
+        total_paths = len(approved_paths) + len(rejected_paths)
+        
+        logger.info(f"=== DUAL PATH RESULTS for {encounter_id} ===")
+        logger.info(f"Approved paths: {len(approved_paths)}/{total_paths}")
+        logger.info(f"Rejected paths: {len(rejected_paths)}/{total_paths}")
+        
+        if len(approved_paths) == total_paths and total_paths > 0:
+            logger.info(f"BOTH PATHS APPROVED for {encounter_id}")
+            return ValidationOutcome(
+                result=ValidationResult.APPROVED,
+                reason=f"STEP 4 PASSED: Both G-DRG paths validated",
+                details={
+                    "encounter_id": encounter_id,
+                    "validation_approach": "dual_path_independent_validation",
+                    "approved_paths": approved_paths,
+                    "total_paths": total_paths,
+                    "next_step": "Step 5: G-DRG Determination (will select highest tariff)"
+                }
+            )
+        
+        elif len(approved_paths) > 0 and len(rejected_paths) > 0:
+            logger.warning(f"PARTIAL APPROVAL for {encounter_id}: {len(approved_paths)} approved, {len(rejected_paths)} rejected")
+            for path in approved_paths:
+                logger.info(f"  ✓ Approved: {path['type']} G-DRG {path['gdrg']}")
+            for path in rejected_paths:
+                logger.warning(f"  ✗ Rejected: {path['type']} G-DRG {path['gdrg']} - {path['reason']}")
+            
+            return ValidationOutcome(
+                result=ValidationResult.PARTIAL,
+                reason=f"PARTIAL: {len(approved_paths)}/{total_paths} G-DRG paths approved",
+                details={
+                    "encounter_id": encounter_id,
+                    "validation_approach": "dual_path_independent_validation",
+                    "approved_paths": approved_paths,
+                    "rejected_paths": rejected_paths,
+                    "total_paths": total_paths,
+                    "next_step": "Step 5: Approved path(s) proceed, rejected excluded"
+                }
+            )
+        
+        else:
+            logger.error(f"ALL PATHS REJECTED for {encounter_id}")
+            for path in rejected_paths:
+                logger.error(f"  ✗ {path['type']} G-DRG {path['gdrg']}: {path['reason']}")
+            
+            return ValidationOutcome(
+                result=ValidationResult.REJECTED,
+                reason=f"REJECT: All {total_paths} G-DRG path(s) failed credentialing",
+                details={
+                    "encounter_id": encounter_id,
+                    "validation_approach": "dual_path_independent_validation",
+                    "rejected_paths": rejected_paths,
+                    "total_paths": total_paths
+                }
+            )
+    
+    async def _validate_gdrg_path(self, claim_data: Dict, gdrg_code: str, path_type: str) -> Dict:
+        
+        try:
+            logger.info(f"  Checking facility level eligibility for {path_type} G-DRG {gdrg_code}")
+            level_check = await self._check_facility_level_gdrg_eligibility(claim_data, gdrg_code)
+            if level_check.result != ValidationResult.APPROVED:
+                logger.warning(f"  Level check failed: {level_check.reason}")
+                return {"valid": False, "reason": level_check.reason}
+            logger.info(f"  Level check passed for {gdrg_code}")
+            
+            logger.info(f"  Checking age requirements for {path_type} G-DRG {gdrg_code}")
+            age_check = await self._validate_patient_age_requirements(claim_data, gdrg_code)
+            if age_check.result != ValidationResult.APPROVED:
+                logger.warning(f"  Age check failed: {age_check.reason}")
+                return {"valid": False, "reason": age_check.reason}
+            logger.info(f"  Age check passed for {gdrg_code}")
+            
+            logger.info(f"  Checking gender requirements for {path_type} G-DRG {gdrg_code}")
+            gender_check = await self._validate_gender_requirements(claim_data, gdrg_code)
+            if gender_check.result != ValidationResult.APPROVED:
+                logger.warning(f"  Gender check failed: {gender_check.reason}")
+                return {"valid": False, "reason": gender_check.reason}
+            logger.info(f"  Gender check passed for {gdrg_code}")
+            
+            logger.info(f"  All credentialing checks PASSED for {path_type} G-DRG {gdrg_code}")
+            return {"valid": True, "reason": "All credentialing checks passed"}
+            
+        except Exception as e:
+            logger.error(f"Error validating {path_type} path for {gdrg_code}: {e}")
+            return {"valid": False, "reason": f"Validation error: {str(e)}"}
     
     def _create_detailed_outcome(self, original_result: ValidationOutcome, step_results: Dict) -> ValidationOutcome:
-        """Create a detailed outcome that includes step-by-step results"""
         if original_result.details is None:
             original_result.details = {}
         
@@ -250,12 +365,7 @@ class FacilityCredentialingValidator:
         return original_result
     
     async def _get_facility_information_from_claims(self, encounter_id: str) -> ValidationOutcome:
-        """
-        Get facility information directly from claims_v3 table
-        UPDATED: No external facility registry lookup needed
-        """
         try:
-            # Get claim data with facility level from claims_v3
             claim = await self.queries.get_claim_with_calculated_age(encounter_id)
             if not claim:
                 return ValidationOutcome(
@@ -264,7 +374,6 @@ class FacilityCredentialingValidator:
                     details={"encounter_id": encounter_id}
                 )
             
-            # Validate required facility fields are present
             required_facility_fields = ['provider_name', 'healthcare_level']
             missing_fields = []
             
@@ -282,7 +391,7 @@ class FacilityCredentialingValidator:
                     }
                 )
             
-            logger.info(f"📋 Facility info from claims: {claim['provider_name']} (Level {claim['healthcare_level']})")
+            logger.info(f"Facility info: {claim['provider_name']} (Level {claim['healthcare_level']})")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -302,38 +411,13 @@ class FacilityCredentialingValidator:
             )
     
     async def _check_facility_level_gdrg_eligibility(self, claim_data: Dict, gdrg_code: str) -> ValidationOutcome:
-        """
-        Check if facility level is eligible for G-DRG using clinical inference data
-        UPDATED: Enhanced debugging to find why MEDI14A lookup is failing
-        """
         try:
             facility_level = str(claim_data['healthcare_level'])
             provider_name = claim_data['provider_name']
             encounter_type = claim_data['encounter_type']
             
-            logger.info(f"🔍 Checking Level {facility_level} eligibility for G-DRG {gdrg_code}")
-            logger.info(f"🔍 Encounter type: {encounter_type}")
+            logger.info(f"Checking Level {facility_level} eligibility for G-DRG {gdrg_code}")
             
-            # First, let's see if MEDI14A exists at all (debugging query)
-            debug_query = """
-            SELECT 
-                gdrg_code,
-                gdrg_description,
-                encounter_type,
-                encounter_type_eligible_facility,
-                is_active
-            FROM clinical_diagnosis_inferences 
-            WHERE gdrg_code = $1
-            """
-            
-            debug_results = await self.queries.db.fetch_all(debug_query, gdrg_code)
-            logger.info(f"🔍 DEBUG: Found {len(debug_results)} total records for G-DRG {gdrg_code}")
-            
-            for i, record in enumerate(debug_results):
-                logger.info(f"🔍 DEBUG Record {i+1}: encounter_type='{record['encounter_type']}', eligible_facility='{record['encounter_type_eligible_facility']}', is_active={record['is_active']}")
-            
-            # Now try the original query with encounter type filter
-            # Updated: Handle PostgreSQL boolean format (is_active can be 't' or True)
             diagnosis_query = """
             SELECT 
                 gdrg_code,
@@ -347,11 +431,8 @@ class FacilityCredentialingValidator:
             ORDER BY encounter_type
             """
             
-            logger.info(f"🔍 Running diagnosis query with gdrg_code='{gdrg_code}', encounter_type='{encounter_type}'")
             diagnosis_results = await self.queries.db.fetch_all(diagnosis_query, gdrg_code, encounter_type)
-            logger.info(f"🔍 Diagnosis query returned {len(diagnosis_results)} results")
             
-            # Also check procedure table
             procedure_query = """
             SELECT 
                 gdrg_code,
@@ -364,18 +445,15 @@ class FacilityCredentialingValidator:
             ORDER BY encounter_type
             """
             
-            logger.info(f"🔍 Running procedure query with gdrg_code='{gdrg_code}', encounter_type='{encounter_type}'")
             procedure_results = await self.queries.db.fetch_all(procedure_query, gdrg_code, encounter_type)
-            logger.info(f"🔍 Procedure query returned {len(procedure_results)} results")
             
-            # Combine all results
             all_results = list(diagnosis_results) + list(procedure_results)
             
+            logger.info(f"Found {len(all_results)} inference records for G-DRG {gdrg_code} with encounter type {encounter_type}")
+            
             if not all_results:
-                # If strict matching failed, try without encounter type filter
-                logger.warning(f" No results with encounter type filter, trying without filter...")
+                logger.warning(f"No strict match found, searching without encounter type constraint")
                 
-                # Try diagnosis without encounter type filter
                 loose_diagnosis_query = """
                 SELECT 
                     gdrg_code,
@@ -389,9 +467,7 @@ class FacilityCredentialingValidator:
                 """
                 
                 loose_diagnosis_results = await self.queries.db.fetch_all(loose_diagnosis_query, gdrg_code)
-                logger.info(f"🔍 Loose diagnosis query returned {len(loose_diagnosis_results)} results")
                 
-                # Try procedure without encounter type filter
                 loose_procedure_query = """
                 SELECT 
                     gdrg_code,
@@ -404,17 +480,16 @@ class FacilityCredentialingValidator:
                 """
                 
                 loose_procedure_results = await self.queries.db.fetch_all(loose_procedure_query, gdrg_code)
-                logger.info(f"🔍 Loose procedure query returned {len(loose_procedure_results)} results")
                 
                 all_results = list(loose_diagnosis_results) + list(loose_procedure_results)
                 
+                logger.info(f"Found {len(all_results)} inference records without encounter type constraint")
+                
                 if not all_results:
-                    logger.error(f" G-DRG {gdrg_code} not found in any clinical inference table")
-                    
-                    # Final fallback to icd10_codes table
+                    logger.warning(f"No inference records found, checking tariff table")
                     icd10_fallback = await self.queries.get_tariff_by_gdrg(gdrg_code)
                     if icd10_fallback:
-                        logger.info(f"🔄 G-DRG {gdrg_code} found in icd10_codes table - using permissive validation")
+                        logger.info(f"G-DRG {gdrg_code} found in icd10_codes table - using permissive validation")
                         return ValidationOutcome(
                             result=ValidationResult.APPROVED,
                             reason="G-DRG found in tariff database - permissive validation applied",
@@ -422,11 +497,11 @@ class FacilityCredentialingValidator:
                                 "facility_level": facility_level,
                                 "gdrg_code": gdrg_code,
                                 "validation_mode": "permissive_tariff_based",
-                                "data_source": "icd10_codes_table_fallback",
-                                "note": "Clinical inference data lookup failed - used tariff validation"
+                                "data_source": "icd10_codes_table_fallback"
                             }
                         )
                     
+                    logger.error(f"G-DRG {gdrg_code} not found in any table")
                     return ValidationOutcome(
                         result=ValidationResult.REJECTED,
                         reason="REJECT: G-DRG not found in clinical inference data",
@@ -435,71 +510,52 @@ class FacilityCredentialingValidator:
                             "encounter_type": encounter_type,
                             "provider_name": provider_name,
                             "facility_level": facility_level,
-                            "searched_tables": ["clinical_diagnosis_inferences", "clinical_procedure_inferences"],
-                            "debug_total_records": len(debug_results),
-                            "total_results_found": 0
+                            "searched_tables": ["clinical_diagnosis_inferences", "clinical_procedure_inferences"]
                         }
                     )
             
-            # Find the best matching result (prefer exact encounter type match)
             best_match = None
             for result in all_results:
                 if result['encounter_type'] == encounter_type:
                     best_match = result
                     break
             
-            # If no exact match, use first available
             if not best_match:
                 best_match = all_results[0]
-                logger.warning(f" Using encounter type '{best_match['encounter_type']}' instead of requested '{encounter_type}'")
+                logger.warning(f"Using first available record as fallback")
             
             gdrg_info = best_match
-            
-            # Parse eligible facility levels
             eligible_facilities = gdrg_info['encounter_type_eligible_facility']
             
-            logger.info(f"🔍 Raw eligible facilities data: '{eligible_facilities}' (type: {type(eligible_facilities)})")
+            logger.info(f"Raw eligible facilities data: {eligible_facilities}")
             
-            # Handle different formats of eligible facilities data
             if isinstance(eligible_facilities, str):
                 try:
-                    # Try to parse as JSON array
                     eligible_facilities = json.loads(eligible_facilities)
-                    logger.info(f"🔍 Parsed as JSON: {eligible_facilities}")
+                    logger.info(f"Parsed eligible facilities from JSON: {eligible_facilities}")
                 except json.JSONDecodeError:
-                    # If not JSON, handle various string formats
                     eligible_facilities = eligible_facilities.strip()
                     
-                    # Handle array-like strings: ["1","2","3"] or ['1','2','3']
                     if eligible_facilities.startswith('[') and eligible_facilities.endswith(']'):
-                        # Remove brackets and parse
                         inner = eligible_facilities[1:-1]
-                        # Split by comma and clean up
                         eligible_facilities = [x.strip().strip('"').strip("'") for x in inner.split(',')]
-                        logger.info(f"🔍 Parsed as array string: {eligible_facilities}")
-                    # Handle comma-separated: "1,2,3" or "1", "2", "3"
                     elif ',' in eligible_facilities:
                         eligible_facilities = [x.strip().strip('"').strip("'") for x in eligible_facilities.split(',')]
-                        logger.info(f"🔍 Parsed as comma-separated: {eligible_facilities}")
-                    # Single value
                     else:
                         eligible_facilities = [eligible_facilities.strip('"').strip("'")]
-                        logger.info(f"🔍 Parsed as single value: {eligible_facilities}")
+                    
+                    logger.info(f"Parsed eligible facilities from string: {eligible_facilities}")
             elif isinstance(eligible_facilities, list):
-                # Already a list, convert all to strings and clean
                 eligible_facilities = [str(x).strip().strip('"').strip("'") for x in eligible_facilities]
-                logger.info(f"🔍 Already a list, cleaned: {eligible_facilities}")
+                logger.info(f"Cleaned eligible facilities list: {eligible_facilities}")
             else:
-                # Convert single value to list
                 eligible_facilities = [str(eligible_facilities).strip('"').strip("'")]
-                logger.info(f"🔍 Converted to list: {eligible_facilities}")
+                logger.info(f"Converted eligible facilities to list: {eligible_facilities}")
             
-            logger.info(f"🔍 Final parsed eligible facilities: {eligible_facilities}")
-            logger.info(f"🔍 Facility level to check: '{facility_level}'")
-            logger.info(f"🔍 Is '{facility_level}' in {eligible_facilities}? {facility_level in eligible_facilities}")
+            logger.info(f"Checking if facility level '{facility_level}' is in eligible levels {eligible_facilities}")
             
-            # Check if facility level is in eligible list
             if facility_level not in eligible_facilities:
+                logger.error(f"LEVEL MISMATCH: Facility level {facility_level} not in eligible levels {eligible_facilities}")
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
                     reason="REJECT: Facility Level Not Authorized for G-DRG",
@@ -510,13 +566,11 @@ class FacilityCredentialingValidator:
                         "gdrg_description": gdrg_info.get('gdrg_description'),
                         "eligible_levels": eligible_facilities,
                         "encounter_type_requested": encounter_type,
-                        "encounter_type_used": gdrg_info['encounter_type'],
-                        "data_source": "clinical_diagnosis_inferences" if gdrg_info in diagnosis_results else "clinical_procedure_inferences",
-                        "raw_eligible_data": gdrg_info['encounter_type_eligible_facility']
+                        "encounter_type_used": gdrg_info['encounter_type']
                     }
                 )
             
-            logger.info(f" Level {facility_level} is authorized for G-DRG {gdrg_code}")
+            logger.info(f"✓ Level {facility_level} is authorized for G-DRG {gdrg_code}")
             
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
@@ -527,9 +581,7 @@ class FacilityCredentialingValidator:
                     "gdrg_code": gdrg_code,
                     "gdrg_description": gdrg_info.get('gdrg_description'),
                     "encounter_type_requested": encounter_type,
-                    "encounter_type_used": gdrg_info['encounter_type'],
-                    "data_source": "clinical_diagnosis_inferences" if gdrg_info in diagnosis_results else "clinical_procedure_inferences",
-                    "total_gdrg_records_found": len(all_results)
+                    "encounter_type_used": gdrg_info['encounter_type']
                 }
             )
             
@@ -542,14 +594,10 @@ class FacilityCredentialingValidator:
             )
     
     async def _validate_patient_age_requirements(self, claim_data: Dict, gdrg_code: str) -> ValidationOutcome:
-        """
-        Validate patient age meets G-DRG requirements from clinical inference data
-        UPDATED: Uses clinical inference data
-        """
         try:
-            # Get G-DRG age restrictions from clinical inference data
             gdrg_info_list = await self.queries.get_gdrg_info_by_code(gdrg_code)
             if not gdrg_info_list:
+                logger.info(f"No G-DRG info found for {gdrg_code} - no age restrictions")
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED, 
                     reason="No age restrictions found",
@@ -560,17 +608,18 @@ class FacilityCredentialingValidator:
             age_restrictions = gdrg_info.get('age_restrictions')
             
             if not age_restrictions:
+                logger.info(f"No age restrictions specified for G-DRG {gdrg_code}")
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED, 
                     reason="No age restrictions specified",
                     details={"age_restriction_source": "not_specified"}
                 )
             
-            # Parse age restrictions
             if isinstance(age_restrictions, str):
                 try:
                     age_restrictions = json.loads(age_restrictions)
                 except json.JSONDecodeError:
+                    logger.warning(f"Invalid age restrictions format for G-DRG {gdrg_code}")
                     return ValidationOutcome(
                         result=ValidationResult.APPROVED, 
                         reason="Invalid age restrictions format",
@@ -581,8 +630,10 @@ class FacilityCredentialingValidator:
             min_age = age_restrictions.get('min_age')
             max_age = age_restrictions.get('max_age')
             
-            # Check minimum age
+            logger.info(f"Age check for G-DRG {gdrg_code}: Patient age={patient_age}, Min={min_age}, Max={max_age}")
+            
             if min_age and patient_age < min_age:
+                logger.error(f"Patient age {patient_age} below minimum {min_age}")
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
                     reason=f"REJECT: Patient age {patient_age} below minimum {min_age} for G-DRG",
@@ -595,8 +646,8 @@ class FacilityCredentialingValidator:
                     }
                 )
             
-            # Check maximum age
             if max_age and patient_age > max_age:
+                logger.error(f"Patient age {patient_age} above maximum {max_age}")
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
                     reason=f"REJECT: Patient age {patient_age} above maximum {max_age} for G-DRG",
@@ -609,6 +660,7 @@ class FacilityCredentialingValidator:
                     }
                 )
             
+            logger.info(f"✓ Patient age {patient_age} meets G-DRG requirements")
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
                 reason="Patient age meets G-DRG requirements",
@@ -629,14 +681,29 @@ class FacilityCredentialingValidator:
             )
     
     async def _validate_gender_requirements(self, claim_data: Dict, gdrg_code: str) -> ValidationOutcome:
-        """
-        Validate patient gender meets G-DRG requirements from clinical inference data
-        NEW: Data-driven gender validation
-        """
         try:
-            # Get G-DRG gender restrictions from clinical inference data
+            icd10_procedure = claim_data.get('icd10_code_procedure')
+            icd10_code = claim_data.get('icd10_code', '')
+            
+            has_both_diagnosis_and_procedure = bool(
+                icd10_code and icd10_code not in ['NA', '', None, 'nan', 'NaN', 'NAN'] and
+                icd10_procedure and icd10_procedure not in ['NA', '', None, 'nan', 'NaN', 'NAN']
+            )
+            
+            if has_both_diagnosis_and_procedure:
+                logger.info(f"Skipping gender validation for {claim_data.get('encounter_id')} - dual path claim")
+                return ValidationOutcome(
+                    result=ValidationResult.APPROVED,
+                    reason="Gender validation deferred to Stage 5 dual evaluation",
+                    details={
+                        "validation_status": "DEFERRED_TO_STAGE5",
+                        "reason": "Claims with both diagnosis and procedure paths are validated separately in Stage 5"
+                    }
+                )
+            
             gdrg_info_list = await self.queries.get_gdrg_info_by_code(gdrg_code)
             if not gdrg_info_list:
+                logger.info(f"No G-DRG info found for {gdrg_code} - no gender restrictions")
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED, 
                     reason="No gender restrictions found",
@@ -647,36 +714,34 @@ class FacilityCredentialingValidator:
             gender_restrictions = gdrg_info.get('gender_restriction')
             
             if not gender_restrictions:
+                logger.info(f"No gender restrictions specified for G-DRG {gdrg_code}")
                 return ValidationOutcome(
                     result=ValidationResult.APPROVED, 
                     reason="No gender restrictions specified",
                     details={"gender_restriction_source": "not_specified"}
                 )
             
-            # Parse gender restrictions
             if isinstance(gender_restrictions, str):
                 try:
                     gender_restrictions = json.loads(gender_restrictions)
                 except json.JSONDecodeError:
-                    # If not JSON, treat as single value or array format
                     if gender_restrictions.startswith('[') and gender_restrictions.endswith(']'):
-                        # Handle array-like string format
                         gender_restrictions = gender_restrictions.strip('[]').replace('"', '').split()
                     else:
                         gender_restrictions = [gender_restrictions]
             elif isinstance(gender_restrictions, list):
-                pass  # Already a list
+                pass
             else:
                 gender_restrictions = [str(gender_restrictions)]
             
             patient_gender = claim_data.get('gender', '').strip()
-            
-            # Normalize gender values for comparison
             normalized_patient_gender = patient_gender.lower()
             normalized_restrictions = [str(g).lower().strip() for g in gender_restrictions]
             
-            # Check if patient gender is allowed
+            logger.info(f"Gender check for G-DRG {gdrg_code}: Patient={patient_gender}, Allowed={gender_restrictions}")
+            
             if normalized_patient_gender not in normalized_restrictions:
+                logger.error(f"GENDER MISMATCH: Patient gender '{patient_gender}' not in allowed {gender_restrictions}")
                 return ValidationOutcome(
                     result=ValidationResult.REJECTED,
                     reason=f"REJECT: Patient gender '{patient_gender}' not allowed for G-DRG",
@@ -689,6 +754,7 @@ class FacilityCredentialingValidator:
                     }
                 )
             
+            logger.info(f"✓ Patient gender {patient_gender} meets G-DRG requirements")
             return ValidationOutcome(
                 result=ValidationResult.APPROVED,
                 reason="Patient gender meets G-DRG requirements",
@@ -708,7 +774,6 @@ class FacilityCredentialingValidator:
             )
     
     async def validate_multiple_claims(self, encounter_ids: List[str]) -> Dict[str, ValidationOutcome]:
-        """Batch validate multiple claims for Step 4"""
         results = {}
         
         for encounter_id in encounter_ids:
@@ -716,9 +781,7 @@ class FacilityCredentialingValidator:
                 result = await self.process_step4_credentialing_check(encounter_id)
                 results[encounter_id] = result
                 
-                # Log summary
-                status_emoji = "" if result.result == ValidationResult.APPROVED else ""
-                logger.info(f"{status_emoji} {encounter_id}: {result.reason}")
+                logger.info(f"{encounter_id}: {result.reason}")
                 
             except Exception as e:
                 logger.error(f"Error validating {encounter_id}: {e}")
@@ -729,106 +792,30 @@ class FacilityCredentialingValidator:
                 )
         
         return results
-    
-    async def get_validation_summary(self, encounter_ids: List[str]) -> Dict[str, Any]:
-        """Get summary statistics for batch validation"""
-        results = await self.validate_multiple_claims(encounter_ids)
-        
-        summary = {
-            "total_claims": len(encounter_ids),
-            "approved": len([r for r in results.values() if r.result == ValidationResult.APPROVED]),
-            "rejected": len([r for r in results.values() if r.result == ValidationResult.REJECTED]),
-            "flagged": len([r for r in results.values() if r.result == ValidationResult.FLAGGED]),
-            "pending": len([r for r in results.values() if r.result == ValidationResult.PENDING]),
-            "success_rate": 0,
-            "results": results
-        }
-        
-        if summary["total_claims"] > 0:
-            summary["success_rate"] = round((summary["approved"] / summary["total_claims"]) * 100, 1)
-        
-        return summary
 
-# Usage examples and testing
-async def main():
-    """Test the facility credentialing validator with real data"""
-    validator = FacilityCredentialingValidator()
-    
-    try:
-        await validator.initialize()
-        
-        # Test with the failing encounter ID
-        test_encounter_id = "LIN-4881-BEEU"  # The failing CVA case
-        
-        print(f"\n🏥 TESTING DATA-DRIVEN STEP 4 VALIDATION FOR: {test_encounter_id}")
-        print("=" * 70)
-        print("🎯 NEW APPROACH: No hardcoding - all validation from clinical inference data")
-        print("=" * 70)
-        
-        # Process Step 4 validation
-        result = await validator.process_step4_credentialing_check(test_encounter_id)
-        
-        # Display detailed results
-        print(f"\n📋 STEP 4 RESULT:")
-        print(f"  Status: {result.result.value}")
-        print(f"  Reason: {result.reason}")
-        print(f"  Approach: Data-Driven (No Hardcoding)")
-        
-        if result.details and "step_by_step_results" in result.details:
-            step_results = result.details["step_by_step_results"]
-            
-            print(f"\n📝 STEP-BY-STEP RESULTS:")
-            print(f"  Steps Completed: {len(step_results['steps_completed'])}")
-            print(f"  Steps Passed: {len(step_results['steps_passed'])}")
-            print(f"  Steps Failed: {len(step_results['steps_failed'])}")
-            print(f"  Overall Result: {step_results['overall_result']}")
-            
-            if step_results['steps_passed']:
-                print(f"\n   PASSED STEPS:")
-                for step in step_results['steps_passed']:
-                    print(f"    {step['step']}: {step['message']}")
-                    if step.get('details'):
-                        for key, value in step['details'].items():
-                            if key not in ['claim_data']:  # Skip large data dumps
-                                print(f"      {key}: {value}")
-            
-            if step_results['steps_failed']:
-                print(f"\n   FAILED STEPS:")
-                for step in step_results['steps_failed']:
-                    print(f"    {step['step']}: {step['message']}")
-                    if step.get('details'):
-                        for key, value in step['details'].items():
-                            print(f"      {key}: {value}")
-        
-        # Test batch validation
-        print(f"\n🔄 TESTING BATCH VALIDATION...")
-        test_encounters = ["LIN-4881-BEEU", "LIN-3012-BUYW", "LIN-0992-RKLN"]
-        
-        summary = await validator.get_validation_summary(test_encounters)
-        
-        print(f"\n📊 BATCH VALIDATION SUMMARY:")
-        print(f"  Total Claims: {summary['total_claims']}")
-        print(f"  Approved: {summary['approved']} ")
-        print(f"  Rejected: {summary['rejected']} ")
-        print(f"  Flagged: {summary['flagged']} ")
-        print(f"  Pending: {summary['pending']} ⏳")
-        print(f"  Success Rate: {summary['success_rate']}%")
-        
-        print(f"\n🎉 DATA-DRIVEN TESTING COMPLETED!")
-        print("=" * 70)
-        print("✨ KEY IMPROVEMENTS:")
-        print("   • No hardcoded facility levels or G-DRG lists")
-        print("   • Facility level from claims_v3 table")
-        print("   • G-DRG eligibility from clinical inference data")
-        print("   • Age restrictions from clinical inference data")
-        print("   • Gender restrictions from clinical inference data")
-        print("   • Completely data-driven validation")
-        
-    except Exception as e:
-        logger.error(f"Test failed: {e}")
-    
-    finally:
-        await validator.close()
 
 if __name__ == "__main__":
+    
+    async def main():
+        validator = FacilityCredentialingValidator()
+        
+        try:
+            await validator.initialize()
+            
+            test_encounter_id = "LIN-4881-BEEU"
+            
+            print(f"\nTesting Step 4 validation for: {test_encounter_id}")
+            print("=" * 70)
+            
+            result = await validator.process_step4_credentialing_check(test_encounter_id)
+            
+            print(f"\nResult: {result.result.value}")
+            print(f"Reason: {result.reason}")
+            
+        except Exception as e:
+            logger.error(f"Test failed: {e}")
+        
+        finally:
+            await validator.close()
+    
     asyncio.run(main())

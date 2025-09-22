@@ -1066,12 +1066,25 @@ class AutomatedBatchProcessor:
             result = await self.credentialing_validator.process_step4_credentialing_check(encounter_id)
             result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
             
-            if result_value == "APPROVED":
+            if result_value in ["APPROVED", "PARTIAL"]:
                 pipeline_results["stages_passed"].append({
                     "stage": "stage4_credentialing",
                     "result": result_value,
                     "reason": result.reason
                 })
+
+                if result_value == "PARTIAL":
+                    logger.info(f"Stage 4 PARTIAL: Some G-DRG paths rejected but processing continues for {encounter_id}")
+                    pipeline_results["stage4_partial"] = True
+
+                stage4_details = result.details or {}
+                rejected_paths = stage4_details.get("rejected_paths", [])
+                rejected_gdrgs = [path.get("gdrg") for path in rejected_paths if path.get("gdrg")]
+
+                if rejected_gdrgs:
+                    pipeline_results["rejected_gdrgs_from_stage4"] = rejected_gdrgs
+                    logger.info(f"Rejected G-DRGs from Stage 4: {rejected_gdrgs}")
+
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1114,8 +1127,16 @@ class AutomatedBatchProcessor:
             pipeline_results["stages_completed"].append("stage5_gdrg_determination")
             pipeline_results["processing_path"].append("G-DRG Determination")
             
-            result = await self.gdrg_determiner.process_step5_gdrg_determination(encounter_id)
+            rejected_gdrgs = pipeline_results.get("rejected_gdrgs_from_stage4", [])
+            result = await self.gdrg_determiner.process_step5_gdrg_determination(
+                encounter_id,
+                rejected_gdrgs_from_step4=rejected_gdrgs
+            )
             result_value = result.result.value if hasattr(result.result, 'value') else str(result.result)
+
+            rejected_from_stage4 = pipeline_results.get("rejected_gdrgs_from_stage4", [])
+            if rejected_from_stage4:
+                logger.info(f"Stage 5 note: G-DRGs {rejected_from_stage4} were already rejected in Stage 4 credentialing")
 
             if result_value == "FLAGGED":
                 if not pipeline_results.get("flagged_at_stage"):
@@ -1188,16 +1209,31 @@ class AutomatedBatchProcessor:
                             details={"stage5_details": result.details}
                         )
             
-            if result_value in ["APPROVED", "FLAGGED"]:
+            if result_value in ["APPROVED", "FLAGGED", "PARTIAL"]:
                 pipeline_results["stages_passed"].append({
                     "stage": "stage5_gdrg_determination",
                     "result": result_value,
                     "reason": result.reason,
-                    "flagged": result_value == "FLAGGED"
+                    "flagged": result_value == "FLAGGED",
+                    "is_partial": result_value == "PARTIAL"
                 })
+
+                if result_value == "PARTIAL":
+                    pipeline_results["gdrg_partial"] = True
+                    logger.info(f"Stage 5 PARTIAL detected - tracking in pipeline for {encounter_id}")
                 
-                outcome_result = ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED
-                stage_reason = "Stage 5 passed: G-DRG determined" if result_value == "APPROVED" else "Stage 5 flagged: G-DRG requires manual review"
+                outcome_result = ValidationResult.PARTIAL if result_value == "PARTIAL" else (
+                    ValidationResult.FLAGGED if result_value == "FLAGGED" else ValidationResult.APPROVED
+                )
+
+
+                if result_value == "PARTIAL":
+                    stage_reason = "Stage 5 partial: One G-DRG path rejected"
+                elif result_value == "APPROVED":
+                    stage_reason = "Stage 5 passed: G-DRG determined"
+                else:
+                    stage_reason = "Stage 5 flagged: G-DRG requires manual review"
+                
                 
                 return ProcessingOutcome(
                     encounter_id=encounter_id,
@@ -1295,7 +1331,14 @@ class AutomatedBatchProcessor:
             pipeline_results["stages_completed"].append("stage7_final_processing_fixed")
             pipeline_results["processing_path"].append("Fixed Final Processing")
             
-            # Check Stage 6 result first
+            
+            stage5_is_partial = pipeline_results.get("gdrg_partial", False) or any(
+                stage.get("is_partial") for stage in pipeline_results.get("stages_passed", [])
+                if stage.get("stage") == "stage5_gdrg_determination"
+            )
+            if stage5_is_partial:
+                logger.info(f"Stage 5 PARTIAL detected in final processing for {encounter_id}")
+
             stage6_passed = pipeline_results.get("stages_passed", [])
             stage6_result = None
             for stage in stage6_passed:
@@ -1368,7 +1411,7 @@ class AutomatedBatchProcessor:
             total_denied = medicine_denied
             total_claimed = total_approved + total_denied
             
-            if has_rejections or medicine_denied > 0:
+            if stage5_is_partial or has_rejections or medicine_denied > 0:
                 final_decision = "FINAL_PARTIALLY_APPROVED"
                 result = ValidationResult.PARTIAL
                 decision_reason = f"Partially Approved: {total_approved:.2f} GHS approved, {total_denied:.2f} GHS denied"
@@ -1638,8 +1681,7 @@ class AutomatedBatchProcessor:
             else:
                 db_update_success = await self.database_updater.update_claim_processing_results(processing_outcome)
             
-           # if db_update_success:
-            #    await self._update_claim_status_to_processed(encounter_id, processing_outcome, pipeline_results, existing_duplicate_flag)
+           
             
             processing_outcome.database_updated = db_update_success
             processing_outcome.processing_stage = ProcessingStage.DATABASE_UPDATE if db_update_success else ProcessingStage.COMPLETED
